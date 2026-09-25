@@ -1,0 +1,39 @@
+# ---------- Environment & secrets ----------
+# Ignore every env file...
+.env
+.env.*
+# ...then re-include the committed templates ("!" = un-ignore).
+# Without these two lines, ".env.*" would also swallow the example files.
+!.env.example
+!.env.local.example
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# ---------- Node / Next.js ----------
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+
+# ---------- Docker ----------
+# Personal local overrides; never shared
+docker-compose.override.yml
+
+# ---------- Editors & OS ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
