@@ -1,0 +1,18 @@
+# Store all text files with LF line endings, in the repo and on checkout.
+# Git auto-detects which files are text.
+* text=auto eol=lf
+
+# Shell scripts must be LF, never leave this to auto-detection.
+# A CRLF shell script fails inside Linux containers with "bad interpreter".
+*.sh text eol=lf
+
+# Binary files: never convert, never diff as text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
