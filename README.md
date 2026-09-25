@@ -10,7 +10,7 @@ Next.js (`apps/web`) fetches health status server-side from a FastAPI backend (`
 
 ### Architecture Decisions
 Decisions that are expensive to reverse are recorded as ADRs in [`docs/adr/`](docs/adr/README.md):
- 
+
 - [ADR-0001: Stack and architecture for Phase 0](docs/adr/0001-stack-choice.md)
 
 ## Setup
