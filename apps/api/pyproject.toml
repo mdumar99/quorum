@@ -26,3 +26,11 @@ target-version = "py313"
 # E/F: pycodestyle + pyflakes basics | I: import sorting
 # UP: modern Python syntax | B: common bug patterns (bugbear)
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]          # lets tests `import app` when run from apps/api
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: needs real Postgres and Redis running (docker compose up -d --wait)",
+]
