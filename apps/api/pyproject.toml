@@ -17,3 +17,12 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.9",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# E/F: pycodestyle + pyflakes basics | I: import sorting
+# UP: modern Python syntax | B: common bug patterns (bugbear)
+select = ["E", "F", "I", "UP", "B"]
