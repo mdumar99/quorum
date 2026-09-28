@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 
 from app.config import get_settings
 from app.logging_config import configure_logging
+from app.routers import health
 
 configure_logging()
 log = structlog.get_logger()
@@ -23,6 +24,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Quorum API", version="0.1.0", lifespan=lifespan)
+
+app.include_router(health.router)
 
 
 @app.middleware("http")
