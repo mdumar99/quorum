@@ -7,7 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # config.py -> app/ -> api/ -> apps/ -> repo root. The .env lives at the repo root.
 # In Docker (P0-2) this file won't exist; that's fine: missing env files are skipped
 # and real environment variables are used instead.
-ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+# Locally, config.py sits at <repo>/apps/api/app/config.py, so the repo root is
+# three levels up. In Docker the file is at /app/app/config.py and has no such
+# ancestor. There's no .env file in the image anyway (real env vars come from
+# Compose), so we simply skip it.
+_PARENTS = Path(__file__).resolve().parents
+ROOT_ENV_FILE = _PARENTS[3] / ".env" if len(_PARENTS) > 3 else None
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
