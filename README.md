@@ -13,7 +13,37 @@ Decisions that are expensive to reverse are recorded as ADRs in [`docs/adr/`](do
 - [ADR-0001: Stack and architecture for Phase 0](docs/adr/0001-stack-choice.md)
 
 ## Setup
-_Filled in by P0-5 (#5) and P0-7 (#7)._
+### Environment configuration
+All configuration comes from environment variables — no connection details or environment-specific values are hardcoded, so the same code runs correctly on your laptop, in CI, and in Docker just by changing what's in the environment.
+
+| File | Used by | When | Committed? |
+|---|---|---|---|
+| `.env` (from `.env.example`) | Compose + API | Native runs: read directly by `config.py`. Docker: read by Compose on the host, which passes values into containers via `environment:` | No |
+| `apps/web/.env.local` (from `.env.local.example`) | Next.js | Native `npm run dev` only | No |
+| `*.example` files | Humans | Reference — copy from these to create the real files above | Yes |
+
+**Why Next.js has its own file:** Next.js only reads `.env*` files from its own package directory (`apps/web/`), not the repo root. The root `.env` is invisible to it, so `apps/web/.env.local` exists to give the frontend its own env file for the values it needs.
+
+**Native vs Docker:** Running natively, `DATABASE_URL` and `REDIS_URL` point at `localhost` plus whichever port Compose publishes to the host, since that's the only way a process running directly on your machine can reach the containers. Inside Docker, the API container can't reach `postgres` or `redis` via `localhost` — that would mean the container itself — so `docker-compose.yml` overrides both variables per service with the container's own service name instead:
+
+```yaml
+services:
+  api:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+```
+
+Same `.env` file, same variable names — Compose just substitutes different values for the pieces that only make sense inside its own network.
+
+Note the port is `5432`, not `POSTGRES_HOST_PORT`: containers talk to Postgres on its internal port inside the Docker network; the host port only matters for processes outside it.
+
+**Quick start:**
+```bash
+cp .env.example .env
+cp apps/web/.env.local.example apps/web/.env.local
+```
+
+_Pre-commit setup: filled in by P0-7 (#7)._
 
 ## Running Locally
 _Filled in by P0-2 (#2)._
