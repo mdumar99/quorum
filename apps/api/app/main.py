@@ -17,8 +17,9 @@ log = structlog.get_logger()
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Fail fast: load config at startup so a missing variable crashes the boot,
     # not the first request an hour later.
-    get_settings()
-    log.info("startup_complete")
+    settings = get_settings()  # fail fast on missing/invalid config
+    configure_logging(settings.log_level)
+    log.info("startup_complete", log_level=settings.log_level)
     yield
     log.info("shutdown")
 

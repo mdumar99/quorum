@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -7,6 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # In Docker (P0-2) this file won't exist; that's fine: missing env files are skipped
 # and real environment variables are used instead.
 ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
 class Settings(BaseSettings):
@@ -20,6 +23,8 @@ class Settings(BaseSettings):
     # Matched case-insensitively: DATABASE_URL -> database_url
     database_url: str
     redis_url: str
+    # Safe to default: every environment can run at INFO. The URLs above have no safe default.
+    log_level: LogLevel = "INFO"
 
 
 @lru_cache
