@@ -107,4 +107,3 @@ Either fix works — option 1 is faster if you don't want to touch anything outs
 
 ## License
 MIT — see [LICENSE](LICENSE).
-

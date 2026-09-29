@@ -35,8 +35,14 @@ it("treats a 503 as data, not a failure, so the failed dependency is kept", asyn
 });
 
 it("returns ok:false when the API cannot be reached", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
-  expect(await getHealth(BASE)).toEqual({ ok: false, error: "Could not reach the API" });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockRejectedValue(new TypeError("fetch failed")),
+  );
+  expect(await getHealth(BASE)).toEqual({
+    ok: false,
+    error: "Could not reach the API",
+  });
 });
 
 it("returns ok:false when the API times out", async () => {
@@ -44,14 +50,23 @@ it("returns ok:false when the API times out", async () => {
     "fetch",
     vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")),
   );
-  expect(await getHealth(BASE)).toEqual({ ok: false, error: "API did not respond in time" });
+  expect(await getHealth(BASE)).toEqual({
+    ok: false,
+    error: "API did not respond in time",
+  });
 });
 
 it("returns ok:false when the body does not match the contract", async () => {
   mockFetch(200, { hello: "world" });
-  expect(await getHealth(BASE)).toEqual({ ok: false, error: "Unrecognised response from API" });
+  expect(await getHealth(BASE)).toEqual({
+    ok: false,
+    error: "Unrecognised response from API",
+  });
 });
 
 it("returns ok:false when API_URL is not set", async () => {
-  expect(await getHealth("")).toEqual({ ok: false, error: "API_URL is not set" });
+  expect(await getHealth("")).toEqual({
+    ok: false,
+    error: "API_URL is not set",
+  });
 });

@@ -55,8 +55,10 @@ export async function getHealth(
     return { ok: true, httpStatus: response.status, data: body };
   } catch (err) {
     const name = err instanceof Error ? err.name : "";
-    if (name === "TimeoutError") return { ok: false, error: "API did not respond in time" };
-    if (name === "SyntaxError") return { ok: false, error: "Unrecognised response from API" };
+    if (name === "TimeoutError")
+      return { ok: false, error: "API did not respond in time" };
+    if (name === "SyntaxError")
+      return { ok: false, error: "Unrecognised response from API" };
     return { ok: false, error: "Could not reach the API" };
   }
 }

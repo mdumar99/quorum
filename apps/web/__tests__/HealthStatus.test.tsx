@@ -8,7 +8,11 @@ afterEach(cleanup); // unmount between tests so each starts with an empty page
 it("renders the healthy state", () => {
   render(
     <HealthStatus
-      result={{ ok: true, httpStatus: 200, data: { status: "ok", db: "ok", redis: "ok" } }}
+      result={{
+        ok: true,
+        httpStatus: 200,
+        data: { status: "ok", db: "ok", redis: "ok" },
+      }}
     />,
   );
   expect(screen.getByTestId("health-status").dataset.state).toBe("healthy");
@@ -19,7 +23,11 @@ it("renders the healthy state", () => {
 it("renders the degraded state and names the failed dependency", () => {
   render(
     <HealthStatus
-      result={{ ok: true, httpStatus: 503, data: { status: "error", db: "error", redis: "ok" } }}
+      result={{
+        ok: true,
+        httpStatus: 503,
+        data: { status: "error", db: "error", redis: "ok" },
+      }}
     />,
   );
   expect(screen.getByTestId("health-status").dataset.state).toBe("degraded");
@@ -28,7 +36,9 @@ it("renders the degraded state and names the failed dependency", () => {
 });
 
 it("renders the unreachable state with the error message", () => {
-  render(<HealthStatus result={{ ok: false, error: "Could not reach the API" }} />);
+  render(
+    <HealthStatus result={{ ok: false, error: "Could not reach the API" }} />,
+  );
   expect(screen.getByTestId("health-status").dataset.state).toBe("unreachable");
   expect(screen.getByText("Could not reach the API")).toBeTruthy();
 });
