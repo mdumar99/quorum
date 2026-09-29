@@ -46,7 +46,39 @@ cp apps/web/.env.local.example apps/web/.env.local
 _Pre-commit setup: filled in by P0-7 (#7)._
 
 ## Running Locally
-_Filled in by P0-2 (#2)._
+
+### Option 1: Everything in Docker (recommended)
+Brings up all four services — Postgres, Redis, the API, and the web app — in one command: the same stack P0-9's smoke test will exercise, and as close as this project gets to a production topology.
+
+```bash
+cp .env.example .env
+docker compose up -d --build --wait
+```
+
+Open the web app at [http://localhost:3000](http://localhost:3000), and check the API directly at [http://localhost:8000/health](http://localhost:8000/health).
+
+Useful commands:
+```bash
+docker compose ps                # see what's running and its health
+docker compose logs -f api       # tail one service's logs
+docker compose down              # stop, keep data
+docker compose down -v           # stop and WIPE data
+```
+
+### Option 2: Native dev loop (hot reload)
+Use this while actively coding on the API or the frontend — both `uvicorn --reload` and `next dev` pick up file changes instantly, which Option 1's built container images don't. Needs both env files from [Setup → Quick start](#environment-configuration) — the web app reads `apps/web/.env.local` directly, and native `npm run dev` doesn't get it from Compose.
+
+```bash
+docker compose up -d --wait postgres redis                               # datastores only
+
+# Terminal 1 (from the repo root)
+cd apps/api && uv run uvicorn app.main:app --reload --no-access-log
+
+# Terminal 2 (from the repo root)
+cd apps/web && npm run dev
+```
+
+Don't run both options at once — they both want ports 8000 and 3000, and the second one to start will fail to bind.
 
 ## Testing
 _Filled in by P0-6 (#6) and P0-9 (#9)._

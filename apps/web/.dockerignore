@@ -1,0 +1,13 @@
+# Rebuilt inside the image; copying the local ones would be slow and wrong
+node_modules/
+.next/
+
+# Secrets and local env: never in an image layer
+.env
+.env.*
+
+# Tests and tooling aren't part of the production build
+__tests__/
+vitest.config.mts
+coverage/
+npm-debug.log*

@@ -1,17 +1,18 @@
-# Phase 0 (P0-3): datastores only. The API runs natively via uv for now;
-# P0-2 adds the api + web services to this same file.
+# Full Phase 0 stack: postgres, redis, api, web.
+# `docker compose up` from a clean clone (after `cp .env.example .env`) brings all four up healthy.
 services:
   postgres:
     image: postgres:17-alpine          # pin the major version; "latest" can change under you
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}          # values come from .env (Compose reads it automatically)
+      POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"         # localhost only: not exposed to your Wi-Fi/LAN
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"   # localhost only; host port configurable
+    volumes:
+      - postgres-data:/var/lib/postgresql/data          # survives `down`; wiped by `down -v`
     healthcheck:
-      # $$ escapes Compose's own ${} substitution, so the variable is
-      # expanded inside the container at check time instead
+      # $$ escapes Compose's own ${} substitution; expanded inside the container instead
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
@@ -26,3 +27,48 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  api:
+    build: ./apps/api
+    environment:
+      # Service names + INTERNAL port 5432 (not POSTGRES_HOST_PORT). See README → Setup.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy     # wait for real readiness, not just "container started"
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # No curl in python:3.13-slim. urlopen raises on a 503, so the container reports
+      # unhealthy if a dependency is down (readiness, not just "process alive").
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  web:
+    build: ./apps/web
+    environment:
+      API_URL: http://api:8000         # server-side only; the browser never sees this address
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # No curl in node:alpine; busybox wget is built in.
+      # 127.0.0.1, not "localhost": on Alpine, localhost can resolve to IPv6 (::1),
+      # where the server isn't listening.
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres-data:
