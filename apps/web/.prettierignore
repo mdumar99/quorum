@@ -1,0 +1,4 @@
+# Generated or owned by other tools; Prettier must not touch these
+package-lock.json
+.next/
+next-env.d.ts

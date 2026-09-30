@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]    # after merge: confirms main itself is green
+  pull_request:         # every PR, including every new commit pushed to it
+
+# If a newer commit arrives on the same branch/PR, cancel the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: these jobs only need to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  hooks:
+    name: Pre-commit hooks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+      # The same hooks as local commits: this is what makes --no-verify pointless.
+      - name: Run all pre-commit hooks on every file
+        run: uvx pre-commit run --all-files --show-diff-on-failure
+
+  api:
+    name: API (lint, format, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/api
+    # Throwaway Postgres + Redis for the integration tests. The job runs on the
+    # runner itself (not in a container), so they're reached via localhost + ports.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: quorum
+          POSTGRES_PASSWORD: ci-only-not-a-secret   # exists only for this job's lifetime
+          POSTGRES_DB: quorum
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quorum -d quorum"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://quorum:ci-only-not-a-secret@localhost:5432/quorum
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+      # uv reads apps/api/.python-version and installs that exact Python.
+      - name: Install dependencies exactly as locked
+        run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -v
+
+  web:
+    name: Web (lint, format, build, typecheck, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: apps/web/.nvmrc      # same Node as local and Docker
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npx prettier --check .
+      # No API runs in this job, so a passing build also proves the page
+      # isn't fetched at build time (the P0-4 ƒ-route guarantee).
+      - run: npm run build
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  docker:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t quorum-api:ci apps/api
+      - run: docker build -t quorum-web:ci apps/web

@@ -26,7 +26,7 @@ git config --global core.autocrlf input
 ```
 
 ## Formatting and linting
-Pre-commit runs on every commit: standard hygiene hooks, `ruff check` and `ruff format` for Python, and a local Prettier hook for the web app (`apps/web`). ESLint isn't in pre-commit — it needs the full `apps/web` install to run correctly, so it will be enforced in CI instead (P0-6). Don't commit with `--no-verify` to skip pre-commit: once CI lands (P0-6), it re-runs the same checks on every push, so skipping locally will only delay the failure, not avoid it.
+Pre-commit runs on every commit: standard hygiene hooks, `ruff check` and `ruff format` for Python, and a local Prettier hook for the web app (`apps/web`). ESLint isn't in pre-commit — it needs the full `apps/web` install to run correctly, so it's enforced in CI instead. Don't commit with `--no-verify` to skip pre-commit: CI re-runs the same checks on every pull request, so skipping locally will only delay the failure, not avoid it.
 
 ## Branches
 `<type>/p0-N-short-description`, e.g. `feat/p0-3-health-endpoint`. Types in use: `feat`, `fix`, `chore`, `docs`, `test`, `style`.

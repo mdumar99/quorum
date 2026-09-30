@@ -1,5 +1,7 @@
 # Quorum
 
+[![CI](https://github.com/mdumar99/quorum/actions/workflows/ci.yml/badge.svg)](https://github.com/mdumar99/quorum/actions/workflows/ci.yml)
+
 ## Overview
 A governed multi-agent AI system for reviewing e-commerce returns and refunds. A panel of specialized agents evaluates each case together, with human review, a full audit trail, and a kill switch keeping the system accountable as it earns trust.
 
@@ -85,7 +87,31 @@ cd apps/web && npm run dev
 Don't run both options at once — they both want ports 8000 and 3000, and the second one to start will fail to bind.
 
 ## Testing
-_Filled in by P0-6 (#6) and P0-9 (#9)._
+### Running tests locally
+
+**API:**
+```bash
+cd apps/api && uv run pytest
+```
+Some tests are marked `integration` and need real Postgres/Redis running (`docker compose up -d --wait postgres redis` first). To run only the tests that don't need them:
+```bash
+cd apps/api && uv run pytest -m "not integration"
+```
+
+**Web:**
+```bash
+cd apps/web && npm test
+```
+
+### What CI runs on every PR
+- **Hooks:** every pre-commit hook runs on every file, so skipping them locally with `--no-verify` doesn't get anything past CI
+- **Lint:** `ruff check` for the API and `eslint` for the web app, catching style and correctness issues static analysis can find without running anything
+- **Format:** `ruff format --check` and `prettier --check`, confirming every file matches the formatting pre-commit already enforces locally
+- **Type check:** `tsc --noEmit` on the web app, catching type errors that ESLint doesn't
+- **Test:** the full API and web test suites, with Postgres and Redis running as real service containers so the integration tests run in CI too, not just locally
+- **Build:** `next build` for the web app (with no API running, proving nothing is fetched at build time), plus a Docker build of both images
+
+_Smoke test: filled in by P0-9 (#9)._
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions: branches, commits, PRs, and tooling.
