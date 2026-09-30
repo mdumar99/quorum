@@ -1,0 +1,36 @@
+# Runs on every `git commit` once installed (`pre-commit install`).
+# CI (P0-6) re-runs the same checks, so skipping hooks with --no-verify only
+# delays the failure; it doesn't avoid it.
+repos:
+  # General hygiene: the snags that recurred throughout Phase 0
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0  # set by `pre-commit autoupdate` in the next step
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  # Python: pinned to the SAME ruff version as apps/api/uv.lock
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.9   # matches `uv run ruff --version` (and apps/api/uv.lock)
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^apps/api/
+      - id: ruff-format
+        files: ^apps/api/
+
+  # Frontend: a LOCAL hook, pinned to the SAME Prettier version as apps/web/package.json.
+  # (pre-commit/mirrors-prettier is archived; ESLint is deliberately left to CI.)
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        entry: prettier --write --ignore-unknown
+        language: node
+        additional_dependencies: ["prettier@3.9.9"]   # matches apps/web/package.json exactly
+        files: ^apps/web/
+        exclude: package-lock\.json$

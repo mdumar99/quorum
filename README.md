@@ -43,7 +43,11 @@ cp .env.example .env
 cp apps/web/.env.local.example apps/web/.env.local
 ```
 
-_Pre-commit setup: filled in by P0-7 (#7)._
+### Developer tooling
+Install the git hooks once after cloning. They format and check every commit:
+
+    uv tool install pre-commit
+    pre-commit install
 
 ## Running Locally
 
@@ -84,7 +88,7 @@ Don't run both options at once — they both want ports 8000 and 3000, and the s
 _Filled in by P0-6 (#6) and P0-9 (#9)._
 
 ## Contributing
-_Filled in by P0-7 (#7)._
+See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions: branches, commits, PRs, and tooling.
 
 ## Troubleshooting
 
@@ -107,4 +111,3 @@ Either fix works — option 1 is faster if you don't want to touch anything outs
 
 ## License
 MIT — see [LICENSE](LICENSE).
-
