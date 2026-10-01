@@ -111,14 +111,23 @@ cd apps/web && npm test
 - **Test:** the full API and web test suites, with Postgres and Redis running as real service containers so the integration tests run in CI too, not just locally
 - **Build:** `next build` for the web app (with no API running, proving nothing is fetched at build time), plus a Docker build of both images
 
-_Smoke test: filled in by P0-9 (#9)._
+### Smoke test
+```bash
+docker compose down
+bash scripts/smoke-test.sh
+```
+Needs `.env` to exist. Stop the dev stack first — the smoke test shares host ports with it, and the script detects a conflict and tells you if you forget.
+
+It brings up the full stack and checks that all services come up healthy, that `/health` returns the exact expected contract, and that the page renders in the `healthy` state. It runs as its own Compose project (`quorum-smoke`), so its teardown never touches your dev data.
+
+It runs on every PR and is a required check.
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions: branches, commits, PRs, and tooling.
 
 ## Troubleshooting
 
-### `docker compose up` fails: "Ports are not available … 5432 … forbidden by its access permissions"
+### Port 5432 already in use: `docker compose up` fails ("Ports are not available … 5432 …") or the smoke test reports "port 5432 is already in use"
 
 **Cause:** something else on your machine is already listening on port 5432 — usually a PostgreSQL instance installed directly on Windows (not in Docker), running as a background service that starts automatically. Docker's `postgres` container is trying to bind to the same port on the host and losing.
 

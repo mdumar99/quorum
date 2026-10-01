@@ -104,3 +104,16 @@ jobs:
       - uses: actions/checkout@v7
       - run: docker build -t quorum-api:ci apps/api
       - run: docker build -t quorum-web:ci apps/web
+
+  smoke:
+    name: Smoke test (full stack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # The DoD says: nothing beyond copying .env.example. CI proves exactly that.
+      - name: Create .env from the committed example
+        run: cp .env.example .env
+      # Called via bash so it works even if the executable bit were ever lost.
+      - name: Run the smoke test
+        run: bash scripts/smoke-test.sh
