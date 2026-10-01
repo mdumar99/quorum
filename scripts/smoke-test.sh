@@ -8,6 +8,7 @@ set -euo pipefail
 
 PROJECT="quorum-smoke"                              # isolated from the dev stack ("quorum")
 WAIT_TIMEOUT="${SMOKE_WAIT_TIMEOUT:-180}"           # seconds; overridable for testing
+OVERALL_TIMEOUT="${SMOKE_OVERALL_TIMEOUT:-600}"     # hard cap on build + start + health, seconds
 API_HEALTH_URL="http://localhost:8000/health"
 WEB_URL="http://localhost:3000/"
 EXPECTED_HEALTH='{"status":"ok","db":"ok","redis":"ok"}'   # the P0-3 contract, exactly
@@ -38,10 +39,13 @@ cleanup() {
 PG_PORT="$(grep -E '^POSTGRES_HOST_PORT=' .env | cut -d= -f2 || true)"
 PG_PORT="${PG_PORT:-5432}"
 
-# -p isolates containers and volumes, NOT host ports. Detect a running dev stack.
+# -p isolates containers and volumes, NOT host ports. This catches a running dev
+# stack (Docker forwards its ports into WSL). Limitation: from WSL it can't see
+# programs listening on the Windows side (e.g. a Windows-native PostgreSQL);
+# Compose then fails with "Ports are not available". See README → Troubleshooting.
 for port in 8000 3000 "$PG_PORT" 6379; do
   if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
-    fail "port $port is already in use. Stop the dev stack first: docker compose down"
+        fail "port $port is already in use. If the dev stack is running: docker compose down. Otherwise find the owner: ss -ltnp | grep :$port"
   fi
 done
 
@@ -49,9 +53,17 @@ done
 trap cleanup EXIT
 
 # ---------- bring the stack up ----------
-log "Starting the stack (waiting up to ${WAIT_TIMEOUT}s for all services to be healthy)"
-compose up -d --build --wait --wait-timeout "$WAIT_TIMEOUT" \
-  || fail "services did not become healthy within ${WAIT_TIMEOUT}s"
+# --wait-timeout only covers waiting for health; `timeout` also bounds the build,
+# image pulls and an unresponsive Docker daemon (e.g. Docker Desktop asleep).
+log "Starting the stack (health wait ${WAIT_TIMEOUT}s, overall limit ${OVERALL_TIMEOUT}s)"
+rc=0
+timeout "$OVERALL_TIMEOUT" docker compose -p "$PROJECT" up -d --build --wait \
+  --wait-timeout "$WAIT_TIMEOUT" || rc=$?
+if [ "$rc" -eq 124 ]; then
+  fail "timed out after ${OVERALL_TIMEOUT}s (stuck building, pulling, or Docker not responding)"
+elif [ "$rc" -ne 0 ]; then
+  fail "docker compose up failed (exit $rc). See the error above"
+fi
 
 # ---------- check the API ----------
 log "Checking API: $API_HEALTH_URL"
