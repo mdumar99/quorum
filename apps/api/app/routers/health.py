@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections.abc import Awaitable
 from typing import Annotated, Literal
 
@@ -25,15 +26,26 @@ class HealthResponse(BaseModel):
     redis: Status
 
 
+def _elapsed_ms(start: float) -> float:
+    return round((time.perf_counter() - start) * 1000, 1)
+
+
 async def _run_check(name: str, check: Awaitable[None]) -> Status:
     """Run one dependency check with a hard time limit. Never raises."""
+    start = time.perf_counter()
     try:
         async with asyncio.timeout(CHECK_TIMEOUT_S):
             await check
+        log.debug("health_check_ok", dependency=name, duration_ms=_elapsed_ms(start))
         return "ok"
     except Exception as exc:
         # Log the reason for operators; never put it in the response (it can leak internals).
-        log.warning("health_check_failed", dependency=name, error=type(exc).__name__)
+        log.warning(
+            "health_check_failed",
+            dependency=name,
+            error=type(exc).__name__,
+            duration_ms=_elapsed_ms(start),
+        )
         return "error"
 
 
