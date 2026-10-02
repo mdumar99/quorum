@@ -9,6 +9,14 @@ from app.db.session import ping_postgres
 from app.routers import health
 
 
+@pytest.fixture(autouse=True)
+def _reset_in_flight():
+    """Single-flight state is module-level; never let one test's checks leak into another."""
+    health._in_flight.clear()
+    yield
+    health._in_flight.clear()
+
+
 async def _ok(*args, **kwargs) -> None:
     return None
 
@@ -72,3 +80,24 @@ def test_hanging_dependency_is_cut_off_by_timeout(unit_client, monkeypatch):
     response = unit_client.get("/health")
     assert response.status_code == 503
     assert time.perf_counter() - start < 1.0  # would be ~30s without the timeout
+
+
+def test_overlapping_checks_share_one_in_flight_call(monkeypatch):
+    """Regression for #15: a check outliving its timeout is joined, not duplicated."""
+    monkeypatch.setattr(health, "CHECK_TIMEOUT_S", 0.05)
+    calls = 0
+
+    async def slow_check() -> None:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.3)  # outlives the 0.05s timeout
+
+    async def scenario():
+        first = await health._run_check("db", slow_check)  # starts check #1, times out
+        second = await health._run_check("db", slow_check)  # #1 still running: must JOIN it
+        await asyncio.sleep(0.4)  # let #1 finish
+        third = await health._run_check("db", slow_check)  # nothing in flight: starts #2
+        return first, second, third
+
+    assert asyncio.run(scenario()) == ("error", "error", "error")
+    assert calls == 2  # the old code would have made 3 calls
