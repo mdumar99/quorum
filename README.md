@@ -5,6 +5,9 @@
 ## Overview
 A governed multi-agent AI system for reviewing e-commerce returns and refunds. A panel of specialized agents evaluates each case together, with human review, a full audit trail, and a kill switch keeping the system accountable as it earns trust.
 
+## Status
+**Phase 0 complete** ([v0.1.0](https://github.com/mdumar99/quorum/releases/tag/v0.1.0)): the full stack, `/health`, CI and smoke test. No agents yet.
+**Next:** Phase 1, the core data model and a first single-agent pipeline.
 
 ## Architecture
 Next.js (`apps/web`) fetches health status server-side from a FastAPI backend (`apps/api`), which in turn talks to PostgreSQL and Redis. All four services run together under Docker Compose.
@@ -54,7 +57,7 @@ Install the git hooks once after cloning. They format and check every commit:
 ## Running Locally
 
 ### Option 1: Everything in Docker (recommended)
-Brings up all four services — Postgres, Redis, the API, and the web app — in one command: the same stack P0-9's smoke test will exercise, and as close as this project gets to a production topology.
+Brings up all four services — Postgres, Redis, the API, and the web app — in one command: the same stack the smoke test (`scripts/smoke-test.sh`) runs, and as close as this project gets to a production topology.
 
 ```bash
 cp .env.example .env
