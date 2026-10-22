@@ -45,3 +45,7 @@ Thumbs.db
 
 # Vercel deployment config
 .vercel
+
+# ---------- Claude Code ----------
+# Personal settings; the shared .claude/settings.json stays committed
+.claude/settings.local.json

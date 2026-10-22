@@ -29,7 +29,7 @@ git config --global core.autocrlf input
 Pre-commit runs on every commit: standard hygiene hooks, `ruff check` and `ruff format` for Python, and a local Prettier hook for the web app (`apps/web`). ESLint isn't in pre-commit — it needs the full `apps/web` install to run correctly, so it's enforced in CI instead. Don't commit with `--no-verify` to skip pre-commit: CI re-runs the same checks on every pull request, so skipping locally will only delay the failure, not avoid it.
 
 ## Branches
-`<type>/p0-N-short-description`, e.g. `feat/p0-3-health-endpoint`. Types in use: `feat`, `fix`, `chore`, `docs`, `test`, `style`.
+`<type>/p1-N-short-description`, e.g. `feat/p0-3-health-endpoint`. Types in use: `feat`, `fix`, `chore`, `docs`, `test`, `style`.
 
 ## Commits
 [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <summary> (#N)`. The ticket number keeps every commit traceable back to the issue that explains why it exists, without having to dig through PR history later.

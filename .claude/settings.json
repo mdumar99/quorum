@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "deny": [
+      "Bash(git push * main)",
+      "Bash(git push * main *)",
+      "Bash(git push *:main)",
+      "Bash(git push*--force*)",
+      "Bash(git push* -f*)",
+      "Bash(* --no-verify)",
+      "Bash(* --no-verify *)",
+      "Bash(git commit -n*)",
+      "Bash(docker compose down*-v*)",
+      "Bash(docker compose down*--volumes*)"
+    ]
+  }
+}
