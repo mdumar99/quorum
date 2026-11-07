@@ -29,10 +29,12 @@ git config --global core.autocrlf input
 Pre-commit runs on every commit: standard hygiene hooks, `ruff check` and `ruff format` for Python, and a local Prettier hook for the web app (`apps/web`). ESLint isn't in pre-commit — it needs the full `apps/web` install to run correctly, so it's enforced in CI instead. Don't commit with `--no-verify` to skip pre-commit: CI re-runs the same checks on every pull request, so skipping locally will only delay the failure, not avoid it.
 
 ## Branches
-`<type>/p1-N-short-description`, e.g. `feat/p0-3-health-endpoint`. Types in use: `feat`, `fix`, `chore`, `docs`, `test`, `style`.
+`<type>/p<phase>-<issue#>-short-name`, e.g. `docs/p1-36-contributing-conventions`. Types in use: `feat`, `fix`, `chore`, `docs`, `test`, `ci`, `style`.
 
 ## Commits
-[Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <summary> (#N)`. The ticket number keeps every commit traceable back to the issue that explains why it exists, without having to dig through PR history later.
+[Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <summary> (#N)`. Here `#N` is the PR number, which GitHub adds when it squash-merges; it is not the ticket number. The PR's `Closes` line links the ticket, so the suffix leads to the PR and the PR leads to the issue that explains why the change exists.
+
+Neither commit subjects nor PR titles carry a ticket tag such as `(P1-3)`. The only suffix on a commit is the `(#N)` that GitHub adds when it squash-merges.
 
 ## Pull requests
 One ticket, one branch, one PR — squash-merge only, so `main` gets one clean commit per ticket instead of a tangle of intermediate "fix typo" commits. Use the PR template. Every PR body ends with `Closes #N`; check that GitHub actually shows the issue as linked before merging, not just that you typed the line.
