@@ -63,7 +63,7 @@ Trivial local choices (a local variable name, the order of things inside one fun
 - Issues and PRs share one number counter.
 
 ### Per-ticket loop
-1. `git switch main && git pull`, then a branch: `<type>/p1-<n>-<short-name>` (check CONTRIBUTING.md for the exact format and update it from `p0` to `p1` if needed).
+1. `git switch main && git pull`, then a branch: `<type>/p<phase>-<issue#>-<short-name>` (the exact format is in the Branches section of CONTRIBUTING.md).
 2. Implement in small steps, running the relevant tests locally.
 3. Show me `git diff --stat` and the key parts of the diff before committing.
 4. Conventional commit message (`feat:`, `fix:`, `docs:`, `chore:`, `test:`, `ci:`).
