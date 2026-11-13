@@ -24,3 +24,6 @@ Accepted ADRs are never edited after the fact. If a decision changes, write a ne
 | ID | Title | Status |
 |---|---|---|
 | [0001](0001-stack-choice.md) | Stack and architecture for Phase 0 | Accepted |
+| [0002](0002-migrations-data-access-roles.md) | Migrations, data access and database roles | Accepted |
+| [0003](0003-decision-pipeline-and-llm.md) | Decision pipeline and LLM integration | Accepted |
+| [0004](0004-returns-api-contract.md) | Returns API contract | Accepted |
