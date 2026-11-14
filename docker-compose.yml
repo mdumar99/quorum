@@ -2,7 +2,7 @@
 # `docker compose up` from a clean clone (after `cp .env.example .env`) brings all four up healthy.
 services:
   postgres:
-    image: postgres:17-alpine          # pin the major version; "latest" can change under you
+    image: postgres:17.11-alpine       # exact minor (ADR-0002); keep in step with ci.yml
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

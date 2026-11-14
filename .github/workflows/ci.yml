@@ -37,7 +37,7 @@ jobs:
     # runner itself (not in a container), so they're reached via localhost + ports.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17.11-alpine   # exact minor (ADR-0002); keep in step with docker-compose.yml
         env:
           POSTGRES_USER: quorum
           POSTGRES_PASSWORD: ci-only-not-a-secret   # exists only for this job's lifetime
