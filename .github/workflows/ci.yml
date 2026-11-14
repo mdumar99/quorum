@@ -61,6 +61,13 @@ jobs:
     env:
       DATABASE_URL: postgresql://quorum:ci-only-not-a-secret@localhost:5432/quorum
       REDIS_URL: redis://localhost:6379/0
+      # For scripts/db-checks.sh. Non-secret placeholders that exist only for this job.
+      # POSTGRES_* must match the postgres service above (a service cannot read job env).
+      POSTGRES_USER: quorum
+      POSTGRES_PASSWORD: ci-only-not-a-secret
+      POSTGRES_DB: quorum
+      QUORUM_OWNER_PASSWORD: ci-only-owner-not-a-secret
+      QUORUM_APP_PASSWORD: ci-only-app-not-a-secret
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.1.0
@@ -71,6 +78,19 @@ jobs:
         run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      # The job's default directory is apps/api; the script is at the repo root.
+      # `host` runs psql in a throwaway postgres:17.11-alpine container on the host network,
+      # because the postgres service above publishes its port on the runner.
+      - name: Create the application roles
+        working-directory: .
+        env:
+          DB_CHECKS_RUNNER: host
+        run: bash scripts/db-checks.sh bootstrap
+      - name: Check the bootstrap is idempotent
+        working-directory: .
+        env:
+          DB_CHECKS_RUNNER: host
+        run: bash scripts/db-checks.sh idempotency
       - run: uv run pytest -v
 
   web:

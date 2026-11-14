@@ -28,6 +28,42 @@ services:
       timeout: 3s
       retries: 10
 
+  # One-shot: creates the two application roles and their grants (ADR-0002), then exits 0.
+  # Idempotent, so it is safe on a fresh volume and on an existing one.
+  bootstrap:
+    image: postgres:17.11-alpine       # same pin as the postgres service; only psql is used
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Connects over the compose network (TCP), where the password IS checked.
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      QUORUM_OWNER_PASSWORD: ${QUORUM_OWNER_PASSWORD:?set it in .env}
+      QUORUM_APP_PASSWORD: ${QUORUM_APP_PASSWORD:?set it in .env}
+    volumes:
+      - ./db/bootstrap.sql:/bootstrap.sql:ro
+    # The postgres image declares a volume at its data directory. This service never uses it,
+    # and a tmpfs mount there stops Docker creating an anonymous volume for the container.
+    tmpfs:
+      - /var/lib/postgresql/data
+    entrypoint:
+      - sh
+      - -c
+      - |
+        # The postgres healthcheck passes on the local socket, which can be before TCP is open
+        # during first initialisation, so wait for TCP here.
+        i=0
+        until pg_isready -q; do
+          i=$$((i + 1))
+          if [ "$$i" -ge 30 ]; then echo "postgres is not reachable over TCP" >&2; exit 1; fi
+          sleep 1
+        done
+        exec psql -X -v ON_ERROR_STOP=1 -v dbname="$$PGDATABASE" -f /bootstrap.sql
+
   api:
     build: ./apps/api
     environment:
@@ -42,6 +78,8 @@ services:
         condition: service_healthy     # wait for real readiness, not just "container started"
       redis:
         condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully   # roles exist before the API starts
     healthcheck:
       # No curl in python:3.13-slim. urlopen raises on a 503, so the container reports
       # unhealthy if a dependency is down (readiness, not just "process alive").
