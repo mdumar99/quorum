@@ -1,0 +1,13 @@
+# Policy v1 (ADR-0003, Decision 2). Parameters only: the rule logic is code, keyed by rule ID.
+# A released version is never edited. A change is a new file (versions/v2.toml).
+version = "v1"
+
+[rules.R1]
+window_days = 30
+
+[rules.R2]
+excluded_categories = ["final_sale", "digital"]
+
+[rules.R3]
+ceiling_minor = 20000
+currency = "USD"

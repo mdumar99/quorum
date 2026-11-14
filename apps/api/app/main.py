@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 
 from app.config import get_settings
 from app.logging_config import configure_logging
+from app.policy import load_current_policy
 from app.routers import health
 
 configure_logging()
@@ -19,6 +20,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # not the first request an hour later.
     settings = get_settings()  # fail fast on missing/invalid config
     configure_logging(settings.log_level)
+    # Validate the policy file once, at startup: an invalid file raises here and stops the boot.
+    app.state.policy = load_current_policy()
+    log.info("policy_loaded", policy_version=app.state.policy.policy_version)
     log.info("startup_complete", log_level=settings.log_level)
     yield
     log.info("shutdown")
