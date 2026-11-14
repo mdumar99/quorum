@@ -98,6 +98,14 @@ jobs:
       # As the owner (OWNER_DATABASE_URL, job env), from apps/api where alembic.ini is.
       - name: Apply the migrations
         run: uv run alembic upgrade head
+      # Applies the bootstrap and the migrations to a throwaway scratch database and diffs
+      # `pg_dump --schema-only` (owners and privileges kept) against the committed db/schema.sql.
+      # Same `host` runner as the bootstrap steps. On drift: bash scripts/db-checks.sh drift --update.
+      - name: Check the schema has not drifted
+        working-directory: .
+        env:
+          DB_CHECKS_RUNNER: host
+        run: bash scripts/db-checks.sh drift
       - run: uv run pytest -v
 
   web:
