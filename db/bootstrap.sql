@@ -57,3 +57,12 @@ GRANT USAGE, CREATE ON SCHEMA public TO quorum_owner;
 -- UPDATE is a column-level opt-in in a later migration; DELETE and TRUNCATE are never granted.
 ALTER DEFAULT PRIVILEGES FOR ROLE quorum_owner IN SCHEMA public
   GRANT SELECT, INSERT ON TABLES TO quorum_app;
+
+-- The schema of Alembic's version table (ADR-0002, Decision 1). The owner owns it; PUBLIC and
+-- the app role get nothing, so quorum_app cannot even see it. The default privileges above are
+-- scoped IN SCHEMA public, which is what keeps this schema out of the app role's reach.
+-- The ALTER and REVOKEs make a schema that already exists converge to the same state.
+CREATE SCHEMA IF NOT EXISTS migrations AUTHORIZATION quorum_owner;
+ALTER SCHEMA migrations OWNER TO quorum_owner;
+REVOKE ALL ON SCHEMA migrations FROM PUBLIC;
+REVOKE ALL ON SCHEMA migrations FROM quorum_app;

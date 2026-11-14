@@ -95,6 +95,9 @@ jobs:
         env:
           DB_CHECKS_RUNNER: host
         run: bash scripts/db-checks.sh idempotency
+      # As the owner (OWNER_DATABASE_URL, job env), from apps/api where alembic.ini is.
+      - name: Apply the migrations
+        run: uv run alembic upgrade head
       - run: uv run pytest -v
 
   web:

@@ -5,37 +5,14 @@ redis`, then `docker compose run --rm bootstrap`; CI runs the bootstrap before p
 DATABASE_URL must name quorum_app and OWNER_DATABASE_URL quorum_owner.
 """
 
-import psycopg
 import pytest
 from psycopg import errors
 
-from app.config import get_settings
-
+# owner_conn and app_conn are in conftest.py (this folder).
 pytestmark = pytest.mark.integration
 
 OWNER = "quorum_owner"
 APP = "quorum_app"
-
-
-@pytest.fixture
-def owner_conn(owner_database_url):
-    conn = psycopg.connect(owner_database_url)
-    try:
-        yield conn
-    finally:
-        conn.rollback()  # every test that writes does so in a transaction it never commits
-        conn.close()
-
-
-@pytest.fixture
-def app_conn():
-    """The API's own connection: the URL comes from Settings, as in production."""
-    conn = psycopg.connect(get_settings().database_url)
-    try:
-        yield conn
-    finally:
-        conn.rollback()
-        conn.close()
 
 
 def _one(conn, sql, params=()):

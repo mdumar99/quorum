@@ -3,10 +3,12 @@ name = "quorum-api"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.20.1",
     "fastapi>=0.141.1",
     "psycopg[binary]>=3.3.6",
     "pydantic-settings>=2.15.0",
     "redis>=8.1.0",
+    "sqlalchemy>=2.1.8",
     "structlog>=26.1.0",
     "uvicorn[standard]>=0.54.0",
 ]
