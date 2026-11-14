@@ -4,9 +4,11 @@
 # Usage: bash scripts/db-checks.sh <command>
 #   bootstrap [dbname]   run db/bootstrap.sql (roles and grants) against a database
 #   idempotency          run the bootstrap twice and show that the second run changed nothing
-#   config-check [file]  check that the api service of the resolved Compose config (the committed
-#                        .env.example, never your .env) holds only the app-role URL. Prints
-#                        no values. Needs docker and python3, not a running stack.
+#   config-check [file]  check the resolved Compose config (the committed .env.example, never your
+#                        .env): the api service holds only the app-role URL, the migrate service
+#                        holds only the owner URL, and api -> migrate -> bootstrap is the start
+#                        order. Prints names, never values. Needs docker and python3, not a
+#                        running stack.
 #
 # Where psql runs is chosen by ONE function, pg(), and nothing else differs:
 #   DB_CHECKS_RUNNER=compose (default)  a one-off container of the compose `bootstrap` service,
@@ -123,15 +125,18 @@ CONFIG_CHECK_PY='
 import json, re, sys
 
 cfg = json.load(sys.stdin)
-api = cfg["services"]["api"]
+services = cfg["services"]
+api = services["api"]
 env = api.get("environment") or {}
 problems = []
+
+URL = r"^postgresql://([^:@/]+):[^@/]+@postgres:5432/"
 
 for name in env:
     if re.search(r"OWNER|SUPERUSER|^POSTGRES_(USER|PASSWORD)$|^PG(USER|PASSWORD)$", name):
         problems.append("api has the variable " + name)
 url = env.get("DATABASE_URL", "")
-m = re.match(r"^postgresql://([^:@/]+):[^@/]+@postgres:5432/", url)
+m = re.match(URL, url)
 if not m:
     problems.append("api DATABASE_URL is missing or not postgresql://<user>:<password>@postgres:5432/")
 elif m.group(1) != "quorum_app":
@@ -140,12 +145,47 @@ for name, value in env.items():
     if "quorum_owner" in str(value):
         problems.append("api variable " + name + " names the owner role")
 
+# The migrate service holds the owner URL and nothing else.
+migrate = services.get("migrate")
+menv = {}
+if migrate is None:
+    problems.append("there is no migrate service")
+else:
+    menv = migrate.get("environment") or {}
+    if "DATABASE_URL" in menv:
+        problems.append("migrate has a DATABASE_URL")
+    for name in sorted(set(menv) - {"OWNER_DATABASE_URL", "DATABASE_URL"}):
+        problems.append("migrate has the variable " + name + " (only OWNER_DATABASE_URL is allowed)")
+    owner_url = menv.get("OWNER_DATABASE_URL")
+    mo = re.match(URL, owner_url) if owner_url else None
+    if not mo:
+        problems.append("migrate OWNER_DATABASE_URL is missing or not postgresql://<user>:<password>@postgres:5432/")
+    elif mo.group(1) != "quorum_owner":
+        problems.append("migrate OWNER_DATABASE_URL does not use the role quorum_owner")
+
+
+# The chain: bootstrap, then migrate, then api. Each waits for the previous one to exit 0.
+def waits_for(service, dependency):
+    depends = (service or {}).get("depends_on") or {}
+    return (depends.get(dependency) or {}).get("condition") == "service_completed_successfully"
+
+
+if "bootstrap" not in services:
+    problems.append("there is no bootstrap service")
+if not waits_for(api, "migrate"):
+    problems.append("api does not wait for migrate with service_completed_successfully")
+if migrate is not None and not waits_for(migrate, "bootstrap"):
+    problems.append("migrate does not wait for bootstrap with service_completed_successfully")
+
 if problems:
     for p in problems:
         print("  FAIL: " + p)
     sys.exit(1)
 print("  api variables: " + ", ".join(sorted(env)))
 print("  api DATABASE_URL uses quorum_app; no owner or superuser variable")
+print("  migrate variables: " + ", ".join(sorted(menv)))
+print("  migrate OWNER_DATABASE_URL uses quorum_owner; no DATABASE_URL")
+print("  chain: api waits for migrate, migrate waits for bootstrap (service_completed_successfully)")
 '
 
 cmd_config_check() {
@@ -156,7 +196,7 @@ cmd_config_check() {
   env -u COMPOSE_FILE -u COMPOSE_ENV_FILES -u COMPOSE_PROJECT_NAME \
     docker compose --env-file .env.example -f "$file" config --format json \
     | python3 -I -c "$CONFIG_CHECK_PY" \
-    || fail "the api service holds more than the app-role URL (see above)"
+    || fail "the api or migrate service does not match the expected credentials or order (see above)"
   log "config-check passed for $file"
 }
 

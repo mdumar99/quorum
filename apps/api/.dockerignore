@@ -1,7 +1,9 @@
-# Local environment and caches: rebuilt inside the image, never copied in
+# Local environment and caches: rebuilt inside the image, never copied in.
+# `**/` matters: a pattern without it only matches at the root of the build context, so the
+# __pycache__ folders under app/ and migrations/ would still be copied into the image.
 .venv/
-__pycache__/
-*.py[cod]
+**/__pycache__/
+**/*.py[cod]
 .pytest_cache/
 .ruff_cache/
 

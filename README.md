@@ -35,7 +35,7 @@ All configuration comes from environment variables — no connection details or 
 services:
   api:
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://quorum_app:${QUORUM_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
 ```
 
 Same `.env` file, same variable names — Compose just substitutes different values for the pieces that only make sense inside its own network.
@@ -79,6 +79,7 @@ Use this while actively coding on the API or the frontend — both `uvicorn --re
 
 ```bash
 docker compose up -d --wait postgres redis                               # datastores only
+docker compose run --rm migrate                                          # database roles, then migrations (migrate runs the bootstrap first; builds the api image on first use)
 
 # Terminal 1 (from the repo root)
 cd apps/api && uv run uvicorn app.main:app --reload --no-access-log
@@ -86,6 +87,8 @@ cd apps/api && uv run uvicorn app.main:app --reload --no-access-log
 # Terminal 2 (from the repo root)
 cd apps/web && npm run dev
 ```
+
+`docker compose up` runs the `bootstrap` and `migrate` one-shot services itself, and `api` waits for both (bootstrap, then migrate) before it starts. Do not list them after `--wait`: Compose treats a service that has exited as a failure there.
 
 Don't run both options at once — they both want ports 8000 and 3000, and the second one to start will fail to bind.
 
@@ -96,7 +99,7 @@ Don't run both options at once — they both want ports 8000 and 3000, and the s
 ```bash
 cd apps/api && uv run pytest
 ```
-Some tests are marked `integration` and need real Postgres/Redis running (`docker compose up -d --wait postgres redis` first). To run only the tests that don't need them:
+Some tests are marked `integration` and need real Postgres/Redis, the two database roles and the migrations: run the two commands of Option 2 first, and export your `.env` (`set -a; . ./.env; set +a`) so `DATABASE_URL` and `OWNER_DATABASE_URL` reach the tests. To run only the tests that don't need them:
 ```bash
 cd apps/api && uv run pytest -m "not integration"
 ```
@@ -136,7 +139,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions: branches, commits, PRs, 
 
 **Fix, option 1 (keep both, change the port Compose uses):**
 1. In `.env`, add or set `POSTGRES_HOST_PORT=5433`.
-2. In the same file, change the port in `DATABASE_URL` to match: `…@localhost:5433/…`. (Postgres still listens on 5432 inside the container; only the host-side port changes.)
+2. In the same file, change the port in `DATABASE_URL` and `OWNER_DATABASE_URL` to match: `…@localhost:5433/…`. (Postgres still listens on 5432 inside the container; only the host-side port changes.)
 3. Restart: `docker compose down && docker compose up -d --wait`
 
 **Fix, option 2 (stop the conflicting service):**
