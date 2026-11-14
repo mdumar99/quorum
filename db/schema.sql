@@ -48,6 +48,124 @@ CREATE TABLE migrations.alembic_version (
 ALTER TABLE migrations.alembic_version OWNER TO quorum_owner;
 
 --
+-- Name: audit_log; Type: TABLE; Schema: public; Owner: quorum_owner
+--
+
+CREATE TABLE public.audit_log (
+    id bigint NOT NULL,
+    return_id uuid NOT NULL,
+    attempt integer NOT NULL,
+    event_type text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    provider text,
+    model_id text,
+    prompt_version text,
+    latency_ms integer,
+    prompt_tokens integer,
+    completion_tokens integer,
+    raw_output text,
+    raw_output_bytes integer,
+    raw_output_sha256 text,
+    raw_output_truncated boolean,
+    conflicting_return_id uuid,
+    CONSTRAINT audit_log_attempt_ck CHECK ((attempt >= 1)),
+    CONSTRAINT audit_log_event_type_ck CHECK ((char_length(event_type) >= 1)),
+    CONSTRAINT audit_log_llm_call_ck CHECK ((((provider IS NULL) = (model_id IS NULL)) AND ((model_id IS NULL) = (prompt_version IS NULL)) AND ((latency_ms IS NULL) OR (latency_ms >= 0)) AND ((prompt_tokens IS NULL) OR (prompt_tokens >= 0)) AND ((completion_tokens IS NULL) OR (completion_tokens >= 0)))),
+    CONSTRAINT audit_log_raw_output_ck CHECK ((((raw_output IS NULL) AND (raw_output_bytes IS NULL) AND (raw_output_sha256 IS NULL) AND (raw_output_truncated IS NULL)) OR ((raw_output IS NOT NULL) AND (raw_output_bytes IS NOT NULL) AND (raw_output_sha256 IS NOT NULL) AND (raw_output_truncated IS NOT NULL) AND (octet_length(raw_output) <= 16384) AND (raw_output_bytes >= octet_length(raw_output)) AND (raw_output_truncated = (raw_output_bytes > octet_length(raw_output))) AND (raw_output_sha256 ~ '^[0-9a-f]{64}$'::text))))
+);
+
+
+ALTER TABLE public.audit_log OWNER TO quorum_owner;
+
+--
+-- Name: audit_log_id_seq; Type: SEQUENCE; Schema: public; Owner: quorum_owner
+--
+
+ALTER TABLE public.audit_log ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.audit_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: decisions; Type: TABLE; Schema: public; Owner: quorum_owner
+--
+
+CREATE TABLE public.decisions (
+    return_id uuid NOT NULL,
+    policy_version text NOT NULL,
+    outcome text NOT NULL,
+    decided_by text NOT NULL,
+    rule_results jsonb NOT NULL,
+    allowed_outcomes text[] NOT NULL,
+    provider text,
+    model_id text,
+    prompt_version text,
+    latency_ms integer,
+    prompt_tokens integer,
+    completion_tokens integer,
+    raw_output text,
+    raw_output_bytes integer,
+    raw_output_sha256 text,
+    raw_output_truncated boolean,
+    CONSTRAINT decisions_allowed_outcomes_ck CHECK (((cardinality(allowed_outcomes) >= 1) AND (allowed_outcomes <@ ARRAY['approve'::text, 'deny'::text, 'escalate'::text]))),
+    CONSTRAINT decisions_decided_by_ck CHECK ((decided_by = ANY (ARRAY['rules'::text, 'llm'::text]))),
+    CONSTRAINT decisions_llm_fields_ck CHECK ((((decided_by = 'rules'::text) AND (provider IS NULL) AND (model_id IS NULL) AND (prompt_version IS NULL) AND (latency_ms IS NULL) AND (prompt_tokens IS NULL) AND (completion_tokens IS NULL) AND (raw_output IS NULL) AND (raw_output_bytes IS NULL) AND (raw_output_sha256 IS NULL) AND (raw_output_truncated IS NULL)) OR ((decided_by = 'llm'::text) AND (provider IS NOT NULL) AND (model_id IS NOT NULL) AND (prompt_version IS NOT NULL) AND (latency_ms IS NOT NULL) AND (latency_ms >= 0) AND ((prompt_tokens IS NULL) OR (prompt_tokens >= 0)) AND ((completion_tokens IS NULL) OR (completion_tokens >= 0)) AND (raw_output IS NOT NULL) AND (raw_output_bytes IS NOT NULL) AND (raw_output_sha256 IS NOT NULL) AND (raw_output_truncated IS NOT NULL)))),
+    CONSTRAINT decisions_outcome_ck CHECK (((outcome = ANY (ARRAY['approve'::text, 'deny'::text, 'escalate'::text])) AND (outcome = ANY (allowed_outcomes)))),
+    CONSTRAINT decisions_raw_output_ck CHECK ((((raw_output IS NULL) AND (raw_output_bytes IS NULL) AND (raw_output_sha256 IS NULL) AND (raw_output_truncated IS NULL)) OR ((raw_output IS NOT NULL) AND (raw_output_bytes IS NOT NULL) AND (raw_output_sha256 IS NOT NULL) AND (raw_output_truncated IS NOT NULL) AND (octet_length(raw_output) <= 16384) AND (raw_output_bytes >= octet_length(raw_output)) AND (raw_output_truncated = (raw_output_bytes > octet_length(raw_output))) AND (raw_output_sha256 ~ '^[0-9a-f]{64}$'::text))))
+);
+
+
+ALTER TABLE public.decisions OWNER TO quorum_owner;
+
+--
+-- Name: returns; Type: TABLE; Schema: public; Owner: quorum_owner
+--
+
+CREATE TABLE public.returns (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    order_id text NOT NULL,
+    order_line_id text NOT NULL,
+    category text NOT NULL,
+    amount_minor bigint NOT NULL,
+    currency text NOT NULL,
+    delivered_on date NOT NULL,
+    reason text NOT NULL,
+    status text NOT NULL,
+    outcome text,
+    error_type text,
+    retry_after_seconds integer,
+    attempt integer DEFAULT 1 NOT NULL,
+    as_of timestamp with time zone DEFAULT now() NOT NULL,
+    policy_version text NOT NULL,
+    idempotency_key text NOT NULL,
+    payload_hash text NOT NULL,
+    key_generation integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT returns_amount_minor_ck CHECK ((amount_minor >= 0)),
+    CONSTRAINT returns_attempt_ck CHECK ((attempt >= 1)),
+    CONSTRAINT returns_error_type_ck CHECK (((error_type IS NULL) OR (error_type = ANY (ARRAY['llm_timeout'::text, 'rate_limited'::text, 'provider_unavailable'::text, 'capacity'::text, 'abandoned'::text, 'invalid_llm_output'::text])))),
+    CONSTRAINT returns_id_v4_ck CHECK (((SUBSTRING((id)::text FROM 15 FOR 1) = '4'::text) AND (SUBSTRING((id)::text FROM 20 FOR 1) = ANY (ARRAY['8'::text, '9'::text, 'a'::text, 'b'::text])))),
+    CONSTRAINT returns_idempotency_key_length_ck CHECK (((char_length(idempotency_key) >= 1) AND (char_length(idempotency_key) <= 255))),
+    CONSTRAINT returns_key_generation_ck CHECK ((key_generation >= 1)),
+    CONSTRAINT returns_order_id_length_ck CHECK (((char_length(order_id) >= 1) AND (char_length(order_id) <= 255))),
+    CONSTRAINT returns_order_line_id_length_ck CHECK (((char_length(order_line_id) >= 1) AND (char_length(order_line_id) <= 255))),
+    CONSTRAINT returns_outcome_ck CHECK (((outcome IS NULL) OR (outcome = ANY (ARRAY['approve'::text, 'deny'::text, 'escalate'::text])))),
+    CONSTRAINT returns_reason_length_ck CHECK ((char_length(reason) <= 2000)),
+    CONSTRAINT returns_retry_after_ck CHECK (((retry_after_seconds IS NULL) OR ((retry_after_seconds >= 0) AND (retry_after_seconds <= 3600)))),
+    CONSTRAINT returns_state_ck CHECK (((status <> ALL (ARRAY['processing'::text, 'decided'::text, 'pending_review'::text, 'failed'::text])) OR ((status = 'processing'::text) AND (outcome IS NULL) AND (error_type IS NULL) AND (retry_after_seconds IS NULL)) OR ((status = 'decided'::text) AND (outcome IS NOT NULL) AND (outcome = ANY (ARRAY['approve'::text, 'deny'::text])) AND (error_type IS NULL) AND (retry_after_seconds IS NULL)) OR ((status = 'pending_review'::text) AND (outcome IS NOT NULL) AND (outcome = 'escalate'::text) AND (error_type IS NULL) AND (retry_after_seconds IS NULL)) OR ((status = 'failed'::text) AND (outcome IS NULL) AND (error_type IS NOT NULL) AND ((error_type <> 'invalid_llm_output'::text) OR (retry_after_seconds IS NULL))))),
+    CONSTRAINT returns_status_ck CHECK ((status = ANY (ARRAY['processing'::text, 'decided'::text, 'pending_review'::text, 'failed'::text])))
+);
+
+
+ALTER TABLE public.returns OWNER TO quorum_owner;
+
+--
 -- Name: alembic_version alembic_version_pkc; Type: CONSTRAINT; Schema: migrations; Owner: quorum_owner
 --
 
@@ -56,10 +174,143 @@ ALTER TABLE ONLY migrations.alembic_version
 
 
 --
+-- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: quorum_owner
+--
+
+ALTER TABLE ONLY public.audit_log
+    ADD CONSTRAINT audit_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: decisions decisions_pkey; Type: CONSTRAINT; Schema: public; Owner: quorum_owner
+--
+
+ALTER TABLE ONLY public.decisions
+    ADD CONSTRAINT decisions_pkey PRIMARY KEY (return_id);
+
+
+--
+-- Name: returns returns_id_policy_version_uq; Type: CONSTRAINT; Schema: public; Owner: quorum_owner
+--
+
+ALTER TABLE ONLY public.returns
+    ADD CONSTRAINT returns_id_policy_version_uq UNIQUE (id, policy_version);
+
+
+--
+-- Name: returns returns_pkey; Type: CONSTRAINT; Schema: public; Owner: quorum_owner
+--
+
+ALTER TABLE ONLY public.returns
+    ADD CONSTRAINT returns_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: returns_active_order_line_uq; Type: INDEX; Schema: public; Owner: quorum_owner
+--
+
+CREATE UNIQUE INDEX returns_active_order_line_uq ON public.returns USING btree (order_id, order_line_id) WHERE ((status = ANY (ARRAY['processing'::text, 'pending_review'::text])) OR ((status = 'decided'::text) AND (outcome = 'approve'::text)));
+
+
+--
+-- Name: returns_idempotency_key_generation_uq; Type: INDEX; Schema: public; Owner: quorum_owner
+--
+
+CREATE UNIQUE INDEX returns_idempotency_key_generation_uq ON public.returns USING btree (idempotency_key, key_generation);
+
+
+--
+-- Name: audit_log audit_log_conflicting_return_fk; Type: FK CONSTRAINT; Schema: public; Owner: quorum_owner
+--
+
+ALTER TABLE ONLY public.audit_log
+    ADD CONSTRAINT audit_log_conflicting_return_fk FOREIGN KEY (conflicting_return_id) REFERENCES public.returns(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: audit_log audit_log_return_fk; Type: FK CONSTRAINT; Schema: public; Owner: quorum_owner
+--
+
+ALTER TABLE ONLY public.audit_log
+    ADD CONSTRAINT audit_log_return_fk FOREIGN KEY (return_id) REFERENCES public.returns(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: decisions decisions_return_policy_fk; Type: FK CONSTRAINT; Schema: public; Owner: quorum_owner
+--
+
+ALTER TABLE ONLY public.decisions
+    ADD CONSTRAINT decisions_return_policy_fk FOREIGN KEY (return_id, policy_version) REFERENCES public.returns(id, policy_version) ON DELETE RESTRICT;
+
+
+--
 -- Name: SCHEMA public; Type: ACL; Schema: -; Owner: pg_database_owner
 --
 
 GRANT ALL ON SCHEMA public TO quorum_owner;
+
+
+--
+-- Name: TABLE audit_log; Type: ACL; Schema: public; Owner: quorum_owner
+--
+
+GRANT SELECT,INSERT ON TABLE public.audit_log TO quorum_app;
+
+
+--
+-- Name: TABLE decisions; Type: ACL; Schema: public; Owner: quorum_owner
+--
+
+GRANT SELECT,INSERT ON TABLE public.decisions TO quorum_app;
+
+
+--
+-- Name: TABLE returns; Type: ACL; Schema: public; Owner: quorum_owner
+--
+
+GRANT SELECT,INSERT ON TABLE public.returns TO quorum_app;
+
+
+--
+-- Name: COLUMN returns.status; Type: ACL; Schema: public; Owner: quorum_owner
+--
+
+GRANT UPDATE(status) ON TABLE public.returns TO quorum_app;
+
+
+--
+-- Name: COLUMN returns.outcome; Type: ACL; Schema: public; Owner: quorum_owner
+--
+
+GRANT UPDATE(outcome) ON TABLE public.returns TO quorum_app;
+
+
+--
+-- Name: COLUMN returns.error_type; Type: ACL; Schema: public; Owner: quorum_owner
+--
+
+GRANT UPDATE(error_type) ON TABLE public.returns TO quorum_app;
+
+
+--
+-- Name: COLUMN returns.retry_after_seconds; Type: ACL; Schema: public; Owner: quorum_owner
+--
+
+GRANT UPDATE(retry_after_seconds) ON TABLE public.returns TO quorum_app;
+
+
+--
+-- Name: COLUMN returns.attempt; Type: ACL; Schema: public; Owner: quorum_owner
+--
+
+GRANT UPDATE(attempt) ON TABLE public.returns TO quorum_app;
+
+
+--
+-- Name: COLUMN returns.updated_at; Type: ACL; Schema: public; Owner: quorum_owner
+--
+
+GRANT UPDATE(updated_at) ON TABLE public.returns TO quorum_app;
 
 
 --

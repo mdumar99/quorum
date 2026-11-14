@@ -8,7 +8,7 @@ This page is for a developer who has just cloned the repo. It covers the two dat
 
 ## What the app role may and may not do
 - It may `SELECT` and `INSERT` on every table the owner creates in schema `public`. This comes from default privileges set by [`db/bootstrap.sql`](../db/bootstrap.sql) (`ALTER DEFAULT PRIVILEGES FOR ROLE quorum_owner IN SCHEMA public`), so a new table gets it with no extra work, as long as the migration creates the table in `public`.
-- It may `UPDATE` only the columns a migration grants explicitly, with a column-level grant such as `GRANT UPDATE (status) ON public.returns TO quorum_app`. It may never `DELETE` or `TRUNCATE`, and it cannot create objects in `public` or see the `migrations` schema.
+- It may `UPDATE` only the columns a migration grants explicitly, with a column-level grant such as `GRANT UPDATE (status, outcome, error_type, retry_after_seconds, attempt, updated_at) ON public.returns TO quorum_app`. It may never `DELETE` or `TRUNCATE`, and it cannot create objects in `public` or see the `migrations` schema.
 - The test suite checks this as the real roles: `apps/api/tests/integration/test_roles.py` and `test_migrations.py`.
 
 ## Where each credential lives
