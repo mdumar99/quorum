@@ -59,7 +59,11 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://quorum:ci-only-not-a-secret@localhost:5432/quorum
+      # The tests run as the real roles: the API as the app role, and the owner connection
+      # (fixtures only, never Settings) for the privilege tests. Their passwords repeat
+      # QUORUM_APP_PASSWORD and QUORUM_OWNER_PASSWORD below: job env cannot reference itself.
+      DATABASE_URL: postgresql://quorum_app:ci-only-app-not-a-secret@localhost:5432/quorum
+      OWNER_DATABASE_URL: postgresql://quorum_owner:ci-only-owner-not-a-secret@localhost:5432/quorum
       REDIS_URL: redis://localhost:6379/0
       # For scripts/db-checks.sh. Non-secret placeholders that exist only for this job.
       # POSTGRES_* must match the postgres service above (a service cannot read job env).
@@ -134,6 +138,9 @@ jobs:
       # The DoD says: nothing beyond copying .env.example. CI proves exactly that.
       - name: Create .env from the committed example
         run: cp .env.example .env
+      # Reads the resolved Compose config of the committed example; prints no values.
+      - name: Check the api service holds only the app-role URL
+        run: bash scripts/db-checks.sh config-check
       # Called via bash so it works even if the executable bit were ever lost.
       - name: Run the smoke test
         run: bash scripts/smoke-test.sh

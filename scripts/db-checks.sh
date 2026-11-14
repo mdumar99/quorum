@@ -4,6 +4,9 @@
 # Usage: bash scripts/db-checks.sh <command>
 #   bootstrap [dbname]   run db/bootstrap.sql (roles and grants) against a database
 #   idempotency          run the bootstrap twice and show that the second run changed nothing
+#   config-check [file]  check that the api service of the resolved Compose config (the committed
+#                        .env.example, never your .env) holds only the app-role URL. Prints
+#                        no values. Needs docker and python3, not a running stack.
 #
 # Where psql runs is chosen by ONE function, pg(), and nothing else differs:
 #   DB_CHECKS_RUNNER=compose (default)  a one-off container of the compose `bootstrap` service,
@@ -111,8 +114,55 @@ cmd_idempotency() {
   fi
 }
 
+# The api service must hold the app-role URL and nothing that opens the owner or the superuser.
+# The checks look at names and at the user part of the URL, not at passwords: in .env.example
+# every placeholder password is the same word, so comparing values would prove nothing.
+# An env_file on the api service needs no rule of its own: Compose merges it into `environment`
+# in the resolved JSON, so its variables show up there and the variable-name rules catch them.
+CONFIG_CHECK_PY='
+import json, re, sys
+
+cfg = json.load(sys.stdin)
+api = cfg["services"]["api"]
+env = api.get("environment") or {}
+problems = []
+
+for name in env:
+    if re.search(r"OWNER|SUPERUSER|^POSTGRES_(USER|PASSWORD)$|^PG(USER|PASSWORD)$", name):
+        problems.append("api has the variable " + name)
+url = env.get("DATABASE_URL", "")
+m = re.match(r"^postgresql://([^:@/]+):[^@/]+@postgres:5432/", url)
+if not m:
+    problems.append("api DATABASE_URL is missing or not postgresql://<user>:<password>@postgres:5432/")
+elif m.group(1) != "quorum_app":
+    problems.append("api DATABASE_URL does not use the role quorum_app")
+for name, value in env.items():
+    if "quorum_owner" in str(value):
+        problems.append("api variable " + name + " names the owner role")
+
+if problems:
+    for p in problems:
+        print("  FAIL: " + p)
+    sys.exit(1)
+print("  api variables: " + ", ".join(sorted(env)))
+print("  api DATABASE_URL uses quorum_app; no owner or superuser variable")
+'
+
+cmd_config_check() {
+  local file="${1:-docker-compose.yml}"
+  [ -f "$file" ] || fail "no such compose file: $file"
+  [ -f .env.example ] || fail ".env.example not found"
+  # Explicit file and env file, so a COMPOSE_* variable or your own .env cannot change the result.
+  env -u COMPOSE_FILE -u COMPOSE_ENV_FILES -u COMPOSE_PROJECT_NAME \
+    docker compose --env-file .env.example -f "$file" config --format json \
+    | python3 -I -c "$CONFIG_CHECK_PY" \
+    || fail "the api service holds more than the app-role URL (see above)"
+  log "config-check passed for $file"
+}
+
 case "${1:-}" in
-  bootstrap)   run_bootstrap "${2:-}" ;;
-  idempotency) cmd_idempotency ;;
-  *) fail "usage: bash scripts/db-checks.sh bootstrap [dbname] | idempotency" ;;
+  bootstrap)    run_bootstrap "${2:-}" ;;
+  idempotency)  cmd_idempotency ;;
+  config-check) cmd_config_check "${2:-}" ;;
+  *) fail "usage: bash scripts/db-checks.sh bootstrap [dbname] | idempotency | config-check [file]" ;;
 esac
