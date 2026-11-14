@@ -90,6 +90,8 @@ cd apps/web && npm run dev
 
 `docker compose up` runs the `bootstrap` and `migrate` one-shot services itself, and `api` waits for both (bootstrap, then migrate) before it starts. Do not list them after `--wait`: Compose treats a service that has exited as a failure there.
 
+The database roles, the migrations, the drift check and how to change a password are described in [docs/database-roles.md](docs/database-roles.md).
+
 Don't run both options at once — they both want ports 8000 and 3000, and the second one to start will fail to bind.
 
 ## Testing

@@ -77,10 +77,12 @@ Trivial local choices (a local variable name, the order of things inside one fun
 - Never commit secrets or a real `.env`. Only `*.example` files hold placeholder values.
 - ADRs live in `docs/adr/`. An ADR is Accepted when its PR merges and is never edited afterwards: changes need a new ADR that supersedes it.
 - Spikes run on `spike/*` branches that are never merged.
+- The API connects only as `quorum_app` and never reads `OWNER_DATABASE_URL`; the owner URL is for migrations and tests.
+- Migrations are hand-written, forward-only and created with `--rev-id`; `db/schema.sql` is regenerated with `bash scripts/db-checks.sh drift --update` and committed with them.
 
 ## Commands
 - Full stack: `docker compose up -d --build --wait` (stop it with `docker compose down`; `-v` wipes data: never run; I'll run it myself)
-- Datastores only: `docker compose up -d --wait postgres redis`
+- Datastores only: `docker compose up -d --wait postgres redis`, then `docker compose run --rm migrate` (it runs the bootstrap first)
 - API tests: `cd apps/api && uv run pytest` (`-m "not integration"` skips tests that need Postgres/Redis)
 - API lint/format: `cd apps/api && uv run ruff check . && uv run ruff format --check .`
 - Web: `cd apps/web && npm test`, `npm run lint`, `npm run build`, `npx tsc --noEmit`
