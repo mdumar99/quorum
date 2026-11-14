@@ -21,6 +21,11 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app ./app
 
+# The migrations travel with the app image (ADR-0002, Decision 1): the one-shot `migrate`
+# compose service runs `alembic upgrade head` from this same image, in /app.
+COPY alembic.ini ./
+COPY migrations ./migrations
+
 # ---------- Stage 2: slim runtime image ----------
 FROM python:3.13-slim
 

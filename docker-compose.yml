@@ -1,8 +1,15 @@
-# Full Phase 0 stack: postgres, redis, api, web.
-# `docker compose up` from a clean clone (after `cp .env.example .env`) brings all four up healthy.
+# Full stack: postgres, redis, api, web, and two one-shot services that run before the api:
+# `bootstrap` (database roles) and `migrate` (schema migrations), in that order.
+# `docker compose up` from a clean clone (after `cp .env.example .env`) brings it all up healthy.
+
+# One build for two services: `api` and `migrate` run the same image (ADR-0002, Decision 1).
+# No `image:` name, so the tags stay scoped to the Compose project.
+x-api-build: &api-build
+  build: ./apps/api
+
 services:
   postgres:
-    image: postgres:17-alpine          # pin the major version; "latest" can change under you
+    image: postgres:17.11-alpine       # exact minor (ADR-0002); keep in step with ci.yml
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -28,11 +35,66 @@ services:
       timeout: 3s
       retries: 10
 
+  # One-shot: creates the two application roles and their grants (ADR-0002), then exits 0.
+  # Idempotent, so it is safe on a fresh volume and on an existing one.
+  bootstrap:
+    image: postgres:17.11-alpine       # same pin as the postgres service; only psql is used
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Connects over the compose network (TCP), where the password IS checked.
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      QUORUM_OWNER_PASSWORD: ${QUORUM_OWNER_PASSWORD:?set it in .env}
+      QUORUM_APP_PASSWORD: ${QUORUM_APP_PASSWORD:?set it in .env}
+    volumes:
+      - ./db/bootstrap.sql:/bootstrap.sql:ro
+    # The postgres image declares a volume at its data directory. This service never uses it,
+    # and a tmpfs mount there stops Docker creating an anonymous volume for the container.
+    tmpfs:
+      - /var/lib/postgresql/data
+    entrypoint:
+      - sh
+      - -c
+      - |
+        # The postgres healthcheck passes on the local socket, which can be before TCP is open
+        # during first initialisation, so wait for TCP here.
+        i=0
+        until pg_isready -q; do
+          i=$$((i + 1))
+          if [ "$$i" -ge 30 ]; then echo "postgres is not reachable over TCP" >&2; exit 1; fi
+          sleep 1
+        done
+        exec psql -X -v ON_ERROR_STOP=1 -v dbname="$$PGDATABASE" -f /bootstrap.sql
+
+  # One-shot: applies the migrations as the owner role, then exits 0. The api waits for it, so a
+  # failed migration (or a wrong owner password) stops the stack before the api starts.
+  migrate:
+    <<: *api-build
+    restart: "no"
+    working_dir: /app                  # where alembic.ini is
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      # The owner URL lives here only: never in the api service, never in Settings. Built from the
+      # one password variable. The password goes in unencoded: letters and digits only.
+      OWNER_DATABASE_URL: postgresql://quorum_owner:${QUORUM_OWNER_PASSWORD:?set it in .env}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully   # the roles and the schema exist first
+
   api:
-    build: ./apps/api
+    <<: *api-build
     environment:
       # Service names + INTERNAL port 5432 (not POSTGRES_HOST_PORT). See README → Setup.
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # The app role, never the superuser or the owner. The URL is built here from the one
+      # password variable, so the password is stored in a single place (.env).
+      DATABASE_URL: postgresql://quorum_app:${QUORUM_APP_PASSWORD:?set it in .env}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
@@ -42,6 +104,8 @@ services:
         condition: service_healthy     # wait for real readiness, not just "container started"
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully   # the schema is current before the API starts
     healthcheck:
       # No curl in python:3.13-slim. urlopen raises on a 503, so the container reports
       # unhealthy if a dependency is down (readiness, not just "process alive").

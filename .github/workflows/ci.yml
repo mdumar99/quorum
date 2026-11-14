@@ -37,7 +37,7 @@ jobs:
     # runner itself (not in a container), so they're reached via localhost + ports.
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17.11-alpine   # exact minor (ADR-0002); keep in step with docker-compose.yml
         env:
           POSTGRES_USER: quorum
           POSTGRES_PASSWORD: ci-only-not-a-secret   # exists only for this job's lifetime
@@ -59,8 +59,19 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://quorum:ci-only-not-a-secret@localhost:5432/quorum
+      # The tests run as the real roles: the API as the app role, and the owner connection
+      # (fixtures only, never Settings) for the privilege tests. Their passwords repeat
+      # QUORUM_APP_PASSWORD and QUORUM_OWNER_PASSWORD below: job env cannot reference itself.
+      DATABASE_URL: postgresql://quorum_app:ci-only-app-not-a-secret@localhost:5432/quorum
+      OWNER_DATABASE_URL: postgresql://quorum_owner:ci-only-owner-not-a-secret@localhost:5432/quorum
       REDIS_URL: redis://localhost:6379/0
+      # For scripts/db-checks.sh. Non-secret placeholders that exist only for this job.
+      # POSTGRES_* must match the postgres service above (a service cannot read job env).
+      POSTGRES_USER: quorum
+      POSTGRES_PASSWORD: ci-only-not-a-secret
+      POSTGRES_DB: quorum
+      QUORUM_OWNER_PASSWORD: ci-only-owner-not-a-secret
+      QUORUM_APP_PASSWORD: ci-only-app-not-a-secret
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.1.0
@@ -71,6 +82,30 @@ jobs:
         run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      # The job's default directory is apps/api; the script is at the repo root.
+      # `host` runs psql in a throwaway postgres:17.11-alpine container on the host network,
+      # because the postgres service above publishes its port on the runner.
+      - name: Create the application roles
+        working-directory: .
+        env:
+          DB_CHECKS_RUNNER: host
+        run: bash scripts/db-checks.sh bootstrap
+      - name: Check the bootstrap is idempotent
+        working-directory: .
+        env:
+          DB_CHECKS_RUNNER: host
+        run: bash scripts/db-checks.sh idempotency
+      # As the owner (OWNER_DATABASE_URL, job env), from apps/api where alembic.ini is.
+      - name: Apply the migrations
+        run: uv run alembic upgrade head
+      # Applies the bootstrap and the migrations to a throwaway scratch database and diffs
+      # `pg_dump --schema-only` (owners and privileges kept) against the committed db/schema.sql.
+      # Same `host` runner as the bootstrap steps. On drift: bash scripts/db-checks.sh drift --update.
+      - name: Check the schema has not drifted
+        working-directory: .
+        env:
+          DB_CHECKS_RUNNER: host
+        run: bash scripts/db-checks.sh drift
       - run: uv run pytest -v
 
   web:
@@ -114,6 +149,9 @@ jobs:
       # The DoD says: nothing beyond copying .env.example. CI proves exactly that.
       - name: Create .env from the committed example
         run: cp .env.example .env
+      # Reads the resolved Compose config of the committed example; prints no values.
+      - name: Check the api service holds only the app-role URL
+        run: bash scripts/db-checks.sh config-check
       # Called via bash so it works even if the executable bit were ever lost.
       - name: Run the smoke test
         run: bash scripts/smoke-test.sh
