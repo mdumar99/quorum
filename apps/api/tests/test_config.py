@@ -7,8 +7,16 @@ from app.config import Settings
 
 
 def test_invalid_log_level_is_rejected():
-    with pytest.raises(ValidationError):
-        Settings(database_url="postgresql://unused", redis_url="redis://unused", log_level="LOUD")
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(
+            database_url="postgresql://unused",
+            redis_url="redis://unused",
+            llm_provider="fake",
+            log_level="LOUD",
+        )
+    # Rejected for the log level and nothing else: without llm_provider it would fail for the
+    # missing provider and this test would pass for the wrong reason.
+    assert [e["loc"] for e in excinfo.value.errors()] == [("log_level",)]
 
 
 def test_settings_has_no_owner_or_superuser_url(monkeypatch):
@@ -20,7 +28,9 @@ def test_settings_has_no_owner_or_superuser_url(monkeypatch):
     monkeypatch.setenv("OWNER_DATABASE_URL", "postgresql://quorum_owner:unused@host/db")
     monkeypatch.setenv("POSTGRES_USER", "unused-superuser")
     monkeypatch.setenv("POSTGRES_PASSWORD", "unused-superuser-password")
-    settings = Settings(database_url="postgresql://unused", redis_url="redis://unused")
+    settings = Settings(
+        database_url="postgresql://unused", redis_url="redis://unused", llm_provider="fake"
+    )
     dumped = str(settings.model_dump())
     assert "quorum_owner" not in dumped
     assert "unused-superuser" not in dumped

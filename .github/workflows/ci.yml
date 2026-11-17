@@ -65,6 +65,8 @@ jobs:
       DATABASE_URL: postgresql://quorum_app:ci-only-app-not-a-secret@localhost:5432/quorum
       OWNER_DATABASE_URL: postgresql://quorum_owner:ci-only-owner-not-a-secret@localhost:5432/quorum
       REDIS_URL: redis://localhost:6379/0
+      # The LLM provider is required (ADR-0003, Decision 6). CI uses the fake: no key, no model.
+      LLM_PROVIDER: fake
       # For scripts/db-checks.sh. Non-secret placeholders that exist only for this job.
       # POSTGRES_* must match the postgres service above (a service cannot read job env).
       POSTGRES_USER: quorum

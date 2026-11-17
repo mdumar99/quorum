@@ -26,6 +26,7 @@ def boot_env(monkeypatch):
     """Dummy settings for the lifespan; the settings cache is cleared before and after."""
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
     monkeypatch.setenv("REDIS_URL", "redis://unused")
+    monkeypatch.setenv("LLM_PROVIDER", "fake")  # required since #48; no key is needed for fake
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

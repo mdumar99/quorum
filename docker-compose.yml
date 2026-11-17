@@ -97,6 +97,10 @@ services:
       DATABASE_URL: postgresql://quorum_app:${QUORUM_APP_PASSWORD:?set it in .env}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Required, no default (ADR-0003, Decision 6): a missing LLM_PROVIDER stops Compose here,
+      # not the API later. The key is empty unless the provider is not fake.
+      LLM_PROVIDER: ${LLM_PROVIDER:?set it in .env}
+      LLM_API_KEY: ${LLM_API_KEY:-}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
