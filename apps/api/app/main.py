@@ -6,6 +6,7 @@ import structlog
 from fastapi import FastAPI, Request
 
 from app.config import get_settings
+from app.llm import build_llm_client
 from app.logging_config import configure_logging
 from app.policy import load_current_policy
 from app.routers import health
@@ -23,6 +24,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Validate the policy file once, at startup: an invalid file raises here and stops the boot.
     app.state.policy = load_current_policy()
     log.info("policy_loaded", policy_version=app.state.policy.policy_version)
+    # Built once and kept on app.state, like the policy. `groq` raises here and stops the boot
+    # until P1-14. The log names the provider and the model, never the key.
+    app.state.llm_client = build_llm_client(settings)
+    log.info(
+        "llm_client_ready",
+        provider=app.state.llm_client.provider,
+        model_id=app.state.llm_client.model_id,
+    )
     log.info("startup_complete", log_level=settings.log_level)
     yield
     log.info("shutdown")

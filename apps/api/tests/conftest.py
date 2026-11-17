@@ -18,7 +18,7 @@ def client():
 def unit_client():
     """Unit client: fake config, no lifespan. Works with no .env and no containers."""
     app.dependency_overrides[get_settings] = lambda: Settings(
-        database_url="postgresql://unused", redis_url="redis://unused"
+        database_url="postgresql://unused", redis_url="redis://unused", llm_provider="fake"
     )
     yield TestClient(app)  # no `with`: lifespan (and its real config load) is skipped
     app.dependency_overrides.clear()  # don't leak the override into other tests
