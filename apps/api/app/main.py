@@ -6,6 +6,7 @@ import structlog
 from fastapi import FastAPI, Request
 
 from app.config import get_settings
+from app.db.pool import POOL_CLOSE_TIMEOUT_S, POOL_STARTED_EVENT, create_pool
 from app.llm import build_llm_client
 from app.logging_config import configure_logging
 from app.policy import load_current_policy
@@ -32,8 +33,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         provider=app.state.llm_client.provider,
         model_id=app.state.llm_client.model_id,
     )
-    log.info("startup_complete", log_level=settings.log_level)
-    yield
+    # The pool is created LAST, so nothing after it can fail and leave its workers running. A URL
+    # that is not a connection string raises here (before anything is started) and stops the boot;
+    # an unreachable database never does: `open(wait=False)` returns at once and the workers keep
+    # trying in the background. The log names the sizes and the timeout, never the URL.
+    pool = create_pool(settings)
+    try:
+        await pool.open(wait=False)
+        app.state.pool = pool
+        log.info(
+            POOL_STARTED_EVENT,
+            min_size=settings.db_pool_min_size,
+            max_size=settings.db_pool_max_size,
+            checkout_timeout_seconds=settings.db_pool_checkout_timeout_seconds,
+        )
+        log.info("startup_complete", log_level=settings.log_level)
+        yield
+    finally:
+        # Bounded: with the database down this cannot hang a stop (it waits at most the timeout).
+        await pool.close(timeout=POOL_CLOSE_TIMEOUT_S)
     log.info("shutdown")
 
 

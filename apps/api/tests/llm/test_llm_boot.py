@@ -27,7 +27,7 @@ KEY = "KEYMARK12345"
 
 @pytest.fixture
 def boot_env(monkeypatch, no_llm_env):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@127.0.0.1:1/d")  # closed port: no DNS
     monkeypatch.setenv("REDIS_URL", "redis://unused")
     monkeypatch.setitem(Settings.model_config, "env_file", None)  # restored by monkeypatch
     get_settings.cache_clear()

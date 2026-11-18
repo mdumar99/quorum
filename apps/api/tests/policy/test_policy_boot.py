@@ -24,7 +24,7 @@ from app.policy import PolicyError, loader
 @pytest.fixture
 def boot_env(monkeypatch):
     """Dummy settings for the lifespan; the settings cache is cleared before and after."""
-    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@127.0.0.1:1/d")  # closed port: no DNS
     monkeypatch.setenv("REDIS_URL", "redis://unused")
     monkeypatch.setenv("LLM_PROVIDER", "fake")  # required since #48; no key is needed for fake
     get_settings.cache_clear()

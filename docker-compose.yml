@@ -18,6 +18,11 @@ services:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"   # localhost only; host port configurable
     volumes:
       - postgres-data:/var/lib/postgresql/data          # survives `down`; wiped by `down -v`
+    # A fixed address, so the api's pool needs no DNS lookup to reach it (issue #50). The first
+    # three numbers can be overridden in .env; the default is in the entry itself.
+    networks:
+      default:
+        ipv4_address: ${QUORUM_NET_PREFIX:-172.31.77}.10
     healthcheck:
       # $$ escapes Compose's own ${} substitution; expanded inside the container instead
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -103,6 +108,10 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
     ports:
       - "127.0.0.1:8000:8000"
+    # The name `postgres` resolves from this hosts-file entry, not from Docker's DNS. Same address
+    # as the postgres service above.
+    extra_hosts:
+      - "postgres:${QUORUM_NET_PREFIX:-172.31.77}.10"
     depends_on:
       postgres:
         condition: service_healthy     # wait for real readiness, not just "container started"
@@ -140,3 +149,11 @@ services:
 
 volumes:
   postgres-data:
+
+networks:
+  default:
+    # A fixed subnet, so the address given to postgres is always inside it. Private range
+    # 172.16.0.0/12; pick another prefix in .env if this one clashes with a network you use.
+    ipam:
+      config:
+        - subnet: ${QUORUM_NET_PREFIX:-172.31.77}.0/24
