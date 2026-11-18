@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     # Read only by the fake adapter; it has no effect for any other provider.
     fake_llm_mode: FakeMode = "ok"
 
+    # The database connection pool (ADR-0002, Decision 2; issue #50).
+    # Final defaults: the values measured with the fixed-address Compose network
+    # (docs/data-access.md has the numbers).
+    db_pool_min_size: int = Field(default=4, ge=1)
+    db_pool_max_size: int = Field(default=4, ge=1)
+    # How long a checkout waits for a connection (ADR-0004, Decision 1: 5 s, below the LLM call
+    # timeout). Positive and finite.
+    db_pool_checkout_timeout_seconds: float = Field(default=5.0, gt=0, allow_inf_nan=False)
+
     @model_validator(mode="after")
     def _key_is_required_unless_the_provider_is_fake(self) -> "Settings":
         if self.llm_api_key is not None and not self.llm_api_key.get_secret_value().strip():
@@ -60,6 +69,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 "llm_api_key (LLM_API_KEY) is required, and must not be empty, "
                 "when llm_provider (LLM_PROVIDER) is not fake"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _the_min_pool_size_is_not_above_the_max(self) -> "Settings":
+        if self.db_pool_min_size > self.db_pool_max_size:
+            raise ValueError(
+                f"db_pool_min_size ({self.db_pool_min_size}) must not be above "
+                f"db_pool_max_size ({self.db_pool_max_size})"
             )
         return self
 
