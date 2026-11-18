@@ -93,7 +93,7 @@ The same design, with the fixed address, `extra_hosts` and subnet set in a scrat
 
 - **Postgres gets a fixed address** on the project's default network, and **the api maps the name `postgres` to it with `extra_hosts`**, so the pool needs no DNS lookup. `DATABASE_URL` keeps the host name `postgres` and port 5432; only the name resolution changes.
 - **`QUORUM_NET_PREFIX`** sets the subnet: the first three numbers of a `/24`, `172.31.77` by default (Postgres is the address ending in `.10`). Set it in `.env` to change all three entries together. Change it if the subnet clashes with another network on your machine, a VPN for example.
-- **On an existing stack, a one-time `docker compose down` may be needed** so that the network is recreated with the fixed subnet. Never add `-v`: it wipes the database volume. This was not tested.
+- **On an existing stack, run `docker compose down` once before the next `docker compose up`.** The first `up` after the fixed-subnet change creates a new default network and then stops with `Error response from daemon: network <id> not found` while it starts the other services, leaving only Postgres running. `docker compose down` (never with `-v`, which wipes the database volume) removes the containers and the network; the next `docker compose up -d --build --wait` then brings the stack up healthy on the new subnet. The database volume is kept: the existing data was reused and no migration ran again. This was seen once, on one existing dev stack. Fresh clones and CI are not affected.
 - **Not measured outside Compose.** The default subnet itself was not measured either; the runs used a different one with the same design.
 
 ## Known limits
