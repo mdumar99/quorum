@@ -84,5 +84,5 @@ What the try showed:
 - A dev volume from before this ticket has no roles and no `migrations` schema. Add `QUORUM_OWNER_PASSWORD` and `QUORUM_APP_PASSWORD` to `.env`, then run `docker compose run --rm migrate` once (not tested on a real pre-ticket volume; a volume with no roles is the same state as a fresh one, which was tested).
 - `docker compose` says `set it in .env`: one of the two `QUORUM_*` password variables is missing or empty in `.env`.
 
-## Not settled yet
-What happens when the database is down at API startup is not decided: the P1-2 spike (check B3) failed one condition when it opened a connection pool while the database was down, and the data-access ticket decides it (ADR-0002, Decision 2).
+## When the database is down at API startup
+With the database down, the API still starts and listens: the connection pool opens without waiting and keeps trying in the background. `/health` reports `db` as "error" until Postgres is back. The pool's connection slots give up after 300 s, and the next checkout then starts new attempts. See [data-access.md](data-access.md).
