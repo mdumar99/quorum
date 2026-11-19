@@ -12,7 +12,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, model_validator
 
 from app.llm.types import LLMCallRecord
 from app.policy import PolicyResult
@@ -41,6 +41,40 @@ class ReturnRow(BaseModel):
     key_generation: int
     created_at: datetime
     updated_at: datetime
+
+
+# ---------- the stored decision (issue #56) ----------
+
+
+class DecisionRow(BaseModel):
+    """The row of the `decisions` table, NOT the API resource (issue #56).
+
+    It has the 16 columns of db/schema.sql in table order, with their types, and is nullable exactly
+    where the column is: the ten model-call columns, which are None for a decision made by the
+    rules. It holds the row as stored and parses nothing: `raw_output` is the capped text of the
+    model's answer (with its byte count, hash and truncation flag), and the rationale inside it is
+    for whoever reads it; `rule_results` is the JSON as stored, because the schema has no CHECK on
+    its shape. There are no defaults: a row read from the table always has all 16 columns.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    return_id: UUID
+    policy_version: str
+    outcome: str
+    decided_by: str
+    rule_results: JsonValue
+    allowed_outcomes: list[str]
+    provider: str | None
+    model_id: str | None
+    prompt_version: str | None
+    latency_ms: int | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    raw_output: str | None
+    raw_output_bytes: int | None
+    raw_output_sha256: str | None
+    raw_output_truncated: bool | None
 
 
 # ---------- the write side (issue #54) ----------

@@ -10,6 +10,7 @@ cleanup of repo_fixtures can find it and nothing else.
 
 import asyncio
 import hashlib
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
@@ -222,17 +223,23 @@ def llm_decision(outcome: str = "approve", category: str = "shoes") -> DecisionR
 
 @asynccontextmanager
 async def app_connection(
-    url: str, *, cursor_factory=None, isolation=None, lock_timeout_ms: int = 15000
+    url: str,
+    *,
+    cursor_factory=None,
+    isolation=None,
+    lock_timeout_ms: int = 15000,
+    autocommit: bool = False,
 ):
     """A connection as quorum_app. Rolled back and closed at the end: a test commits explicitly.
 
     `lock_timeout_ms` is applied as the libpq option `-c lock_timeout=<n>`: a lock wait that nobody
     releases ends in `psycopg.errors.LockNotAvailable` instead of a hang. The default is longer than
     the 10 s timeout of `wait_until_blocked`, so a deliberate wait is never cut short by it.
+    `autocommit` (issue #56) opens the connection in autocommit mode; the default is off, as before.
     """
     kwargs = {"cursor_factory": cursor_factory} if cursor_factory is not None else {}
     conn = await AsyncConnection.connect(
-        url, options=f"-c lock_timeout={lock_timeout_ms}", **kwargs
+        url, options=f"-c lock_timeout={lock_timeout_ms}", autocommit=autocommit, **kwargs
     )
     try:
         if isolation is not None:
@@ -250,6 +257,62 @@ async def with_conn(url: str, action, *, commit: bool = True, **kwargs):
         if commit:
             await conn.commit()
         return result
+
+
+class HeldWrite:
+    """The handle `held_write` gives the body: the action's result and the way to commit it."""
+
+    def __init__(self, conn: AsyncConnection, result):
+        self.conn = conn
+        self.result = result
+        self.committed = False
+
+    async def commit(self) -> None:
+        await self.conn.commit()
+        self.committed = True
+
+
+@asynccontextmanager
+async def held_write(url: str, action, *, lock_timeout_ms: int = 2000):
+    """Run `await action(conn)` on its OWN quorum_app connection and HOLD the transaction: nothing
+    is committed until the body calls `await held.commit()` (issue #56).
+
+    `action` is an async callable that takes the connection, for example
+    `lambda c: finalize_decided(c, ...)`, `lambda c: insert_return(c, ...)` or
+    `lambda c: retry_failed(c, row)`; its result is `held.result`. At exit the transaction is rolled
+    back and the connection closed (by `app_connection`), also when the body raises and also when
+    the action itself raises, so the owner cleanup never waits on a lock this connection holds. The
+    connection has a `lock_timeout` (2 s by default): a wait that nobody releases ends in
+    `LockNotAvailable` and not in a hang.
+    """
+    async with app_connection(url, lock_timeout_ms=lock_timeout_ms) as conn:
+        yield HeldWrite(conn, await action(conn))
+
+
+STATE_TABLES = ("returns", "decisions", "audit_log")
+
+
+async def table_state(conn: AsyncConnection, return_id: UUID) -> dict:
+    """What the CALLER'S OWN connection sees of the tables, in its own transaction (issue #56): the
+    count of each of the three tables, and the `xmin` of the return row and of its decision row
+    (None when there is none). It is read on the connection under test and not through an owner
+    connection, because an UPDATE or INSERT that the function made and did not commit is invisible
+    to every other connection and visible to this one. `xmin` is the id of the transaction that
+    wrote the row version, so it changes on ANY update, also one that sets a column to itself.
+    """
+    state = {}
+    for table in STATE_TABLES:  # a fixed tuple, never user input
+        cursor = await conn.execute(f"SELECT count(*) FROM public.{table}")
+        state[f"{table}_count"] = (await cursor.fetchone())[0]
+    cursor = await conn.execute("SELECT xmin::text FROM public.returns WHERE id = %s", (return_id,))
+    found = await cursor.fetchone()
+    state["return_xmin"] = found[0] if found else None
+    cursor = await conn.execute(
+        "SELECT xmin::text FROM public.decisions WHERE return_id = %s", (return_id,)
+    )
+    found = await cursor.fetchone()
+    state["decision_xmin"] = found[0] if found else None
+    return state
 
 
 # ---------- deterministic interleavings ----------
@@ -291,6 +354,112 @@ def is_returns_update(text: str) -> bool:
     """True for a statement that updates `returns`: it starts with UPDATE and mentions `returns`."""
     flat = " ".join(text.split()).upper()
     return flat.startswith("UPDATE") and "RETURNS" in flat
+
+
+# The words that make a statement more than a plain read: data changes, DDL, privileges, a
+# transaction or savepoint command, SELECT ... INTO (which creates a table) and SET.
+_NOT_A_READ = re.compile(
+    r"\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|COPY|CREATE|DROP|ALTER|GRANT|REVOKE|CALL|LOCK|INTO"
+    r"|SAVEPOINT|RELEASE|ROLLBACK|COMMIT|BEGIN|SET|RESET)\b",
+    re.IGNORECASE,
+)
+# The four row-locking clauses of SELECT. (UPDATE is also caught by the list above; SHARE is not.)
+_LOCKING_CLAUSE = re.compile(
+    r"\bFOR\s+(NO\s+KEY\s+UPDATE|KEY\s+SHARE|UPDATE|SHARE)\b", re.IGNORECASE
+)
+_DOLLAR_TAG = re.compile(r"\$[A-Za-z_][A-Za-z_0-9]*\$|\$\$")
+_ESCAPE_STRING = re.compile(r"(?<![A-Za-z0-9_])[eE]'")
+
+
+def _is_identifier_char(char: str) -> bool:
+    """A character that can be part of a PostgreSQL identifier: a letter, a digit, `_`, `$`, or any
+    non-ASCII character. A `$` right after one is part of the identifier (`a$x$` is a name), not
+    the start of a dollar quote: a dollar quote after an identifier needs whitespace between."""
+    return char.isalnum() or char in "_$" or ord(char) > 127
+
+
+def _blank_comments_and_literals(text: str) -> str | None:
+    """`text` with comments replaced by a space and string literals, quoted identifiers and
+    dollar-quoted strings replaced by an empty literal; None when it cannot be read to the end
+    (an unterminated comment, string or dollar quote)."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        two = text[i : i + 2]
+        if two == "--":
+            end = text.find("\n", i)
+            i = n if end == -1 else end
+            out.append(" ")
+        elif two == "/*":
+            depth, i = 1, i + 2
+            while depth and i < n:
+                if text[i : i + 2] == "/*":
+                    depth, i = depth + 1, i + 2
+                elif text[i : i + 2] == "*/":
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+            if depth:
+                return None
+            out.append(" ")
+        elif text[i] in ("'", '"'):
+            quote, i = text[i], i + 1
+            while True:
+                end = text.find(quote, i)
+                if end == -1:
+                    return None
+                if text[end : end + 2] == quote * 2:  # a doubled quote is an escaped quote
+                    i = end + 2
+                    continue
+                i = end + 1
+                break
+            out.append(quote * 2)
+        elif (
+            text[i] == "$"
+            and (i == 0 or not _is_identifier_char(text[i - 1]))
+            and (tag := _DOLLAR_TAG.match(text, i))
+        ):
+            end = text.find(tag.group(), tag.end())
+            if end == -1:
+                return None
+            i = end + len(tag.group())
+            out.append("''")
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def is_plain_select(text: str) -> bool:
+    """True only for ONE statement that is a plain SELECT: after comments are dropped and string
+    literals are blanked, it starts with SELECT (any case, leading whitespace or comments allowed),
+    holds no `;` except one at the end, none of the words in `_NOT_A_READ` (INSERT, UPDATE, DELETE,
+    SAVEPOINT, INTO, SET and the like), and none of the four locking clauses (FOR UPDATE, FOR NO KEY
+    UPDATE, FOR SHARE, FOR KEY SHARE, in any case and across line breaks). A data-modifying CTE
+    (WITH ... INSERT/UPDATE/DELETE ...) is refused because it does not start with SELECT and holds
+    the words; so is every WITH, VALUES, TABLE, EXPLAIN and parenthesised statement, even a harmless
+    one: the predicate is deliberately conservative, a false "no" costs a look and a false "yes"
+    costs the guarantee.
+
+    WHAT IT CANNOT DETECT. It reads TEXT, not effects. A function call with a side effect inside a
+    plain SELECT passes (`SELECT nextval('s')`, `SELECT set_config(...)`, `SELECT
+    pg_advisory_lock(1)`, a user function that writes), and so does a view or rule that writes. It
+    does not understand backslash-escape strings (E'...'): they are refused, not read. Text it
+    cannot read to the end is refused. So it is one guard among several, not the proof that a
+    function writes nothing: the others are the exact-SQL test, the row counts and `xmin` checks,
+    and the fact that `quorum_app` has only SELECT and INSERT on `decisions`.
+    """
+    if _ESCAPE_STRING.search(text):
+        return False
+    cleaned = _blank_comments_and_literals(text)
+    if cleaned is None:
+        return False
+    flat = " ".join(cleaned.split())
+    if flat.endswith(";"):
+        flat = flat[:-1].rstrip()
+    if not re.match(r"select\b", flat, re.IGNORECASE) or ";" in flat:
+        return False
+    return not (_NOT_A_READ.search(flat) or _LOCKING_CLAUSE.search(flat))
 
 
 def statement_hook(trigger: str, callback):
