@@ -8,6 +8,8 @@ from datetime import date, datetime
 from pathlib import Path
 from uuid import UUID
 
+from pydantic import JsonValue
+
 from app.config import Settings
 
 # tests/db/db_helpers.py -> db -> tests -> api -> apps -> repo root
@@ -61,6 +63,41 @@ def returns_columns() -> list[tuple[str, type, bool]]:
         sql_type = re.split(r" DEFAULT | NOT NULL", rest)[0]
         assert sql_type in SQL_TYPES, f"a returns column has a type this test does not map: {line}"
         columns.append((m.group(1), SQL_TYPES[sql_type], " NOT NULL" not in rest))
+    return columns
+
+
+# The Python types of the `decisions` columns (issue #56). A separate map from SQL_TYPES, so the
+# check on `returns` is not loosened: `jsonb` is the JSON as stored, `text[]` a list of strings.
+DECISION_SQL_TYPES: dict[str, object] = {
+    "uuid": UUID,
+    "text": str,
+    "integer": int,
+    "boolean": bool,
+    "jsonb": JsonValue,
+    "text[]": list[str],
+}
+
+
+def decisions_columns() -> list[tuple[str, object, bool]]:
+    """(name, Python type, nullable) of public.decisions, in table order, from db/schema.sql."""
+    assert SCHEMA.is_file(), "db/schema.sql does not exist"
+    match = re.search(r"CREATE TABLE public\.decisions \((.*?)\n\);", SCHEMA.read_text(), re.S)
+    assert match is not None, "CREATE TABLE public.decisions not found in db/schema.sql"
+    columns = []
+    for line in match.group(1).splitlines():
+        if not line.strip():  # the capture starts right after "(", so the first line is empty
+            continue
+        m = re.fullmatch(r"    ([a-z_0-9]+) (.+?),?", line)  # digits too: raw_output_sha256
+        if m is None:
+            # Not skipped silently: a column this pattern missed would drop out of every check.
+            assert line.startswith("    CONSTRAINT "), f"unrecognised line in decisions: {line}"
+            continue
+        rest = m.group(2)
+        sql_type = re.split(r" DEFAULT | NOT NULL", rest)[0]
+        assert sql_type in DECISION_SQL_TYPES, (
+            f"a decisions column has a type this test does not map: {line}"
+        )
+        columns.append((m.group(1), DECISION_SQL_TYPES[sql_type], " NOT NULL" not in rest))
     return columns
 
 

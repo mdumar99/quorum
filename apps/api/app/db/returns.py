@@ -25,6 +25,7 @@ from app.db.audit import LLM_COLUMNS, insert_audit, llm_values
 from app.db.models import (
     Applied,
     DecisionRecord,
+    DecisionRow,
     ExpiredKey,
     FinalizeResult,
     InFlight,
@@ -86,6 +87,53 @@ async def get_return(conn: AsyncConnection, return_id: UUID) -> ReturnRow | None
     """The return with this id, or None."""
     async with conn.cursor(row_factory=class_row(ReturnRow)) as cursor:
         await cursor.execute(RETURN_BY_ID_SQL, (return_id,))
+        return await cursor.fetchone()
+
+
+# ---------- the stored decision (issue #56) ----------
+# The columns of public.decisions in table order: the six decision columns, then the ten model-call
+# columns (the same ten names the decision and audit writes use). A test compares this list, the
+# model's fields and the table in db/schema.sql.
+DECISION_COLUMNS: tuple[str, ...] = (
+    "return_id",
+    "policy_version",
+    "outcome",
+    "decided_by",
+    "rule_results",
+    "allowed_outcomes",
+    *LLM_COLUMNS,
+)
+# An explicit column list, never SELECT *, as RETURN_BY_ID_SQL. Built from the constant above, which
+# holds no user input; the return id is a bound parameter.
+DECISION_BY_RETURN_SQL = (
+    f"SELECT {', '.join(DECISION_COLUMNS)} FROM public.decisions WHERE return_id = %s"
+)
+
+
+async def get_decision(conn: AsyncConnection, return_id: UUID) -> DecisionRow | None:
+    """The stored decision of a return: its `decisions` row as stored (all 16 columns, the raw
+    output unparsed), or None.
+
+    None means there is no decision row: the id does not exist, or the return is `processing` or
+    `failed` (those never have one), or it is a `decided` or `pending_review` return that the
+    repository did not write (nothing in the schema forces the row; the callers show no decision).
+
+    It runs ONE `SELECT` and writes nothing: no UPDATE or INSERT, no savepoint, no commit. The
+    caller owns the transaction, as for `get_return` and `lookup_key`. Unlike the four write
+    functions it does NOT refuse an autocommit connection: they refuse it because they need a
+    savepoint and one transaction for a status change, a decision row and an audit row, and a read
+    needs neither (a single SELECT is complete in autocommit mode).
+
+    THE CONTRACT. A return and its decision are committed in ONE transaction (`finalize_decided`,
+    and the R4 deny of `insert_return` and of `retry_failed`). So a caller reads the return FIRST
+    and the decision AFTER it, and shows the decision only when the status read says `decided` or
+    `pending_review`. A status read that says that has seen a committed transaction, and a later
+    statement sees its decision row (each statement takes a fresh snapshot at READ COMMITTED, which
+    the repository assumes). When the status read says `processing` or `failed` the caller shows
+    no decision, even if this read now returns a row (a finalize may have committed in between).
+    """
+    async with conn.cursor(row_factory=class_row(DecisionRow)) as cursor:
+        await cursor.execute(DECISION_BY_RETURN_SQL, (return_id,))
         return await cursor.fetchone()
 
 
