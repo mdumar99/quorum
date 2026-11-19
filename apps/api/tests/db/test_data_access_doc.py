@@ -108,6 +108,9 @@ def test_the_doc_does_not_call_the_existing_stack_step_untested(text):
 
 REPOSITORY_HEADING = "## The returns repository"
 KNOWN_LIMITS_HEADING = "### Known limits of the repository"
+RETURNS_HEADING = "### What each function returns"
+TRANSACTION_HEADING = "### The transaction rule"
+LOST_HEADING = "### Lost"
 
 
 def repository_section(text: str) -> list[str]:
@@ -151,6 +154,7 @@ RETURNS = [
     ("finalize_decided", ["Applied", "Lost"]),
     ("finalize_failed", ["Applied", "Lost"]),
     ("retry_failed", ["Retried", "R4Denied", "Lost"]),
+    ("get_decision", ["DecisionRow", "None"]),
 ]
 
 
@@ -215,3 +219,57 @@ def test_the_repository_section_has_no_private_references(text):
     section = "\n".join(repository_section(text))
     found = re.findall(r"\bD-\d{3}\b|quorum-notes|scratchpad|/tmp/|~/", section)
     assert not found, f"the public section names private things: {found}"
+
+
+# ---- get_decision: the stored-decision read (issue #56) ------------------------------------------
+
+
+def test_the_get_decision_bullet_says_what_comes_back_as_stored_and_when_it_is_none(text):
+    functions = subsection(repository_section(text), RETURNS_HEADING)
+    bullets = [line for line in functions if line.startswith("- `get_decision(")]
+    assert len(bullets) == 1, f"expected one get_decision bullet, found {len(bullets)}"
+    needles = [
+        "every column",
+        "unknown id",
+        "`processing`",
+        "`failed`",
+        "unparsed",
+        "`rule_results`",
+        "the JSON that was stored",
+    ]
+    missing = [needle for needle in needles if needle not in bullets[0]]
+    assert not missing, f"the get_decision bullet does not say {missing}"
+
+
+def test_the_doc_says_a_read_writes_nothing_and_is_not_refused_on_an_autocommit_connection(text):
+    rule = subsection(repository_section(text), TRANSACTION_HEADING)
+    found = lines_with(
+        rule,
+        "`get_decision` runs one `SELECT`",
+        "no savepoint",
+        "does not refuse an autocommit connection",
+    )
+    assert found, "no line says that get_decision runs one SELECT and does not refuse autocommit"
+
+
+def test_the_doc_says_the_decision_is_read_after_the_return_and_gated_on_its_status(text):
+    rule = subsection(repository_section(text), TRANSACTION_HEADING)
+    found = lines_with(
+        rule,
+        "Read the return first, then the decision",
+        "show the decision only when the status says `decided` or `pending_review`",
+        "committed in one transaction",
+        "show no decision",
+    )
+    assert found, "no line says to read the return first and to show the decision only when decided"
+
+
+def test_the_lost_section_says_the_caller_reads_the_return_again_and_answers_from_its_state(text):
+    lost = subsection(repository_section(text), LOST_HEADING)
+    found = lines_with(
+        lost,
+        "After a lost finalize or a lost retry",
+        "reads the return again",
+        "answers from its state",
+    )
+    assert found, "the Lost section does not say that the caller reads the return again"

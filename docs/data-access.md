@@ -55,6 +55,7 @@ The write side of the returns API: storing a return, finding it again by its ide
 Every outcome is a small frozen class, never a flag or an exception for an expected case, and each one carries the row it concerns.
 
 - `lookup_key(conn, idempotency_key, payload_hash, ttl_seconds)` reads the latest generation of a key and returns `NoKey` (generation 1 is next), `ExpiredKey` (older than the TTL: a new submission, with the next generation), `PayloadMismatch` (the key was used with another payload), `InFlight` (the return is `processing`), `Retryable` (`failed` with a transient error) or `Replay` (everything else). It only reads.
+- `get_decision(conn, return_id)` reads the stored decision of a return and returns the `DecisionRow` as stored, every column, or `None` when there is no decision row: an unknown id, or a `processing` or `failed` return. The raw output comes back unparsed, and `rule_results` is the JSON that was stored. It only reads.
 - `insert_return(conn, fields, ...)` stores a `processing` return with attempt 1 and returns `Inserted`, `R4Denied` or `KeyConflict`. `as_of` is never supplied: the database's clock sets it.
 - `finalize_decided(conn, ...)` moves a `processing` return to `decided` or `pending_review` and returns `Applied` or `Lost`. It writes the decision row and one audit row.
 - `finalize_failed(conn, ...)` moves a `processing` return to `failed` and returns `Applied` or `Lost`. It checks its input first (a `ValueError` before any SQL) and writes an audit row but no decision row.
@@ -65,8 +66,10 @@ Every outcome is a small frozen class, never a flag or an exception for an expec
 
 - **The caller owns the transaction, and nothing here commits.** Every function takes a connection from `async with pool.connection()`. The status change, the decision row and the audit row of one step are written in the caller's transaction, so they commit or roll back together.
 - **Autocommit is refused.** `insert_return`, `finalize_decided`, `finalize_failed` and `retry_failed` raise `RuntimeError` before any SQL when the connection is in autocommit mode, because each statement would then commit by itself and the steps could not be atomic. The pool's connections are not autocommit, so this never fires for the real caller.
+- **A read writes nothing and is not refused on an autocommit connection.** `get_decision` runs one `SELECT`: no `UPDATE` or `INSERT`, no savepoint and no commit, and the caller owns the transaction. Unlike `insert_return`, `finalize_decided`, `finalize_failed` and `retry_failed`, it does not refuse an autocommit connection: they need savepoints and one transaction for a status change, a decision row where there is one, and an audit row, and a single `SELECT` needs neither.
 - **The repository never calls `conn.transaction()`.** On an idle connection psycopg treats it as an outer transaction: it begins one and commits it on exit, which would commit the caller's work. The savepoints are plain SQL through `conn.execute` (`SAVEPOINT`, `ROLLBACK TO SAVEPOINT`, `RELEASE SAVEPOINT`), run inside the transaction that psycopg opens before the first statement.
 - **The repository assumes the pool's default READ COMMITTED isolation.** After a violation of the active-order-line index, the check that tells a same-key request from another submission relies on the colliding row being committed (or the caller's own) and visible to the next statement. At REPEATABLE READ a row committed after the snapshot would be invisible to that check. The pool sets no isolation level.
+- **Read the return first, then the decision, and show the decision only when the status says `decided` or `pending_review`.** A return and its decision are committed in one transaction (`finalize_decided`, and the R4 deny of `insert_return` and of `retry_failed`), so a status read that says `decided` or `pending_review` has seen a committed transaction, and a later statement sees its decision row. When the status read says `processing` or `failed`, show no decision, even if the decision read now returns a row: a finalize may have committed in between. A `decided` or `pending_review` return that the repository did not write has no decision row, and the read returns `None` for it.
 - **Other errors are not caught.** Only the two known unique violations are handled, and only to take the documented branch. A lost connection, a pool timeout, a CHECK or foreign-key violation propagate unchanged, and the caller's transaction decides.
 
 ### R4 and the key conflict
@@ -89,6 +92,7 @@ Every outcome is a small frozen class, never a flag or an exception for an expec
 - **A transition out of `processing` is one UPDATE on the id, the status and the attempt.** If it changes no row (another attempt owns the return, or it is no longer `processing`) the result is `Lost`, and the row is left as it was.
 - **A lost `finalize_decided` or `finalize_failed` writes only an audit row**, `superseded`, with the loser's attempt and its model call, and no decision row.
 - **A lost `retry_failed` writes no audit row**, because that attempt never entered `processing` and has no attempt number of its own.
+- **After a lost finalize or a lost retry, the caller reads the return again and answers from its state.**
 
 ### The audit rows
 
