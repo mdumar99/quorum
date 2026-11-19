@@ -46,6 +46,74 @@ async with pool.connection() as conn:
 - `ReturnRow` is a frozen Pydantic model with one field per column of `returns`. The query lists its columns explicitly and never uses `SELECT *`, so a schema change fails loudly instead of silently adding or losing a field.
 - **Errors are not mapped here.** Turning `PoolTimeout` (and a connection error) into an HTTP response is the returns API's job (P1-12).
 
+## The returns repository
+
+The write side of the returns API: storing a return, finding it again by its idempotency key, and moving it from one status to the next, with the decision row and the audit row that belong to each step. There is no HTTP here. The functions are in `apps/api/app/db/returns.py`; the closed lists of statuses, error types and audit event types are in `apps/api/app/db/vocabulary.py`, the audit row is in `apps/api/app/db/audit.py`, the payload hash in `apps/api/app/db/payload.py` and the result classes in `apps/api/app/db/models.py`. The contract is [ADR-0004](adr/0004-returns-api-contract.md) (statuses, idempotency, R4) and [ADR-0003](adr/0003-decision-pipeline-and-llm.md) (policy, decisions, audit).
+
+### What each function returns
+
+Every outcome is a small frozen class, never a flag or an exception for an expected case, and each one carries the row it concerns.
+
+- `lookup_key(conn, idempotency_key, payload_hash, ttl_seconds)` reads the latest generation of a key and returns `NoKey` (generation 1 is next), `ExpiredKey` (older than the TTL: a new submission, with the next generation), `PayloadMismatch` (the key was used with another payload), `InFlight` (the return is `processing`), `Retryable` (`failed` with a transient error) or `Replay` (everything else). It only reads.
+- `insert_return(conn, fields, ...)` stores a `processing` return with attempt 1 and returns `Inserted`, `R4Denied` or `KeyConflict`. `as_of` is never supplied: the database's clock sets it.
+- `finalize_decided(conn, ...)` moves a `processing` return to `decided` or `pending_review` and returns `Applied` or `Lost`. It writes the decision row and one audit row.
+- `finalize_failed(conn, ...)` moves a `processing` return to `failed` and returns `Applied` or `Lost`. It checks its input first (a `ValueError` before any SQL) and writes an audit row but no decision row.
+- `retry_failed(conn, row)` moves a `failed` return with a transient error back to `processing` and returns `Retried`, `R4Denied` or `Lost`.
+- `insert_audit(conn, ...)` writes one audit row. The functions above call it, and an event type outside the closed list is a `ValueError` before any SQL.
+
+### The transaction rule
+
+- **The caller owns the transaction, and nothing here commits.** Every function takes a connection from `async with pool.connection()`. The status change, the decision row and the audit row of one step are written in the caller's transaction, so they commit or roll back together.
+- **Autocommit is refused.** `insert_return`, `finalize_decided`, `finalize_failed` and `retry_failed` raise `RuntimeError` before any SQL when the connection is in autocommit mode, because each statement would then commit by itself and the steps could not be atomic. The pool's connections are not autocommit, so this never fires for the real caller.
+- **The repository never calls `conn.transaction()`.** On an idle connection psycopg treats it as an outer transaction: it begins one and commits it on exit, which would commit the caller's work. The savepoints are plain SQL through `conn.execute` (`SAVEPOINT`, `ROLLBACK TO SAVEPOINT`, `RELEASE SAVEPOINT`), run inside the transaction that psycopg opens before the first statement.
+- **The repository assumes the pool's default READ COMMITTED isolation.** After a violation of the active-order-line index, the check that tells a same-key request from another submission relies on the colliding row being committed (or the caller's own) and visible to the next statement. At REPEATABLE READ a row committed after the snapshot would be invisible to that check. The pool sets no isolation level.
+- **Other errors are not caught.** Only the two known unique violations are handled, and only to take the documented branch. A lost connection, a pool timeout, a CHECK or foreign-key violation propagate unchanged, and the caller's transaction decides.
+
+### R4 and the key conflict
+
+- **R4 is a database rule.** At most one return per order line is active: `processing`, `pending_review`, or `decided` with outcome `approve`. The partial unique index `returns_active_order_line_uq` enforces it, and `ACTIVE_RETURN_PREDICATE_SQL` in `returns.py` is the same condition (a test on Postgres checks that the two agree for every combination of status and outcome).
+- **The loser of a collision is stored, not rejected.** A second key on an active order line gets a `decided`/`deny` return, a decision row (the single R4 entry, `decided_by` `rules`) and an audit row `r4_denied` that names the other return. The other return's id is not in what the function returns.
+- **The same key and generation is a `KeyConflict`, never R4.** The unique index `returns_idempotency_key_generation_uq` allows one return per key and generation. After a violation of the active-order-line index the repository also checks whether the colliding return carries the same key and generation, so the answer does not depend on which index Postgres reports first. The caller reads the existing return again with `lookup_key`.
+- **A blocker that left is not R4.** If no active return is found after a collision, it left after the collision: the insert is retried once. If it collides again and the blocker is still not found, the deny is stored with a NULL `conflicting_return_id` (fail closed). There are at most two attempts, never a loop.
+
+### The retry rules
+
+- **Only a transient failure is retried:** `llm_timeout`, `rate_limited`, `provider_unavailable`, `capacity` or `abandoned`. `invalid_llm_output` is permanent and is never moved back.
+- **A retry is one compare-and-set** on the status and on the attempt the caller read, so two concurrent retries cannot both win: the second gets `Lost`.
+- **A retry that goes back to `processing` adds one to `attempt`** and clears `error_type` and `retry_after_seconds` in the same statement (a `processing` return carries neither).
+- **A retry that is denied by R4 also advances `attempt` to n + 1.** It ends as a `decided`/`deny` return with the R4 decision row and an `r4_denied` audit row of attempt n + 1. ADR-0004 says `attempt` is incremented every time a row enters `processing`; a denied retry never enters it but is still an attempt, so the return, its audit row and the attempt number agree. This extends that sentence by one case.
+- **A blocker that left during a retry is handled as for an insert:** the update is retried once, and a deny with a NULL `conflicting_return_id` is stored if the blocker is never found.
+
+### Lost
+
+- **A transition out of `processing` is one UPDATE on the id, the status and the attempt.** If it changes no row (another attempt owns the return, or it is no longer `processing`) the result is `Lost`, and the row is left as it was.
+- **A lost `finalize_decided` or `finalize_failed` writes only an audit row**, `superseded`, with the loser's attempt and its model call, and no decision row.
+- **A lost `retry_failed` writes no audit row**, because that attempt never entered `processing` and has no attempt number of its own.
+
+### The audit rows
+
+- **One audit row per attempt**, written in the caller's transaction. The event types are a closed list in `vocabulary.py`: `rules_decided`, `llm_decided`, `escalated`, `r4_denied`, `superseded`, and `failed_<error_type>` for each of the six error types (eleven in all). An escalate is always `escalated`, whoever decided. The list is closed in code, not by a database CHECK, so a later ticket can add a type without a migration.
+
+### The idempotency key
+
+- **The payload hash is the SHA-256 of the canonical JSON of the seven request fields** (sorted keys, ASCII only, the date in ISO form), never of the key. There is no Unicode normalisation and no trimming: the stored text is verbatim, so payloads that are stored differently hash differently.
+- **Expiry is measured on the database clock.** A key is expired when `now()` (the start of the caller's transaction) minus the `created_at` of its latest generation is strictly greater than `ttl_seconds`; an expired key is a new submission with the next `key_generation`. `ttl_seconds` must be a finite number greater than 0 and is a parameter: the value and the setting that holds it belong to the returns API ticket, and none exists yet.
+- **A `processing` return of any age is in flight.** Until a staleness check exists (P1-13), nothing here reads an age to decide that.
+
+### Running the integration tests safely
+
+- **Run them against a throwaway database, never the stack you develop on.** Tests that commit data refuse to run unless the environment says so: `QUORUM_TEST_DB=throwaway`, or `CI=true` (GitHub sets it). Any other value of `QUORUM_TEST_DB` is refused, even when `CI` is `true`.
+- **Use a separate Compose project** with its own environment file, its own published ports and its own subnet (`QUORUM_NET_PREFIX`), and give the test process every variable of that file, so that `Settings` cannot fall back to your own `.env`.
+- **Test rows carry a marker** that starts with `p154-`, at the start of both the key and the order id. The owner role removes them afterwards, and only rows whose order id and key both start with the marker.
+- **The race tests wait for a real block.** They release the first connection only once `pg_blocking_pids` reports the second as blocked, and a lock wait that nobody releases ends after 15 seconds with `LockNotAvailable`, not in a hang.
+
+### Known limits of the repository
+
+- **A crashed attempt blocks its order line until P1-13.** A `processing` return is in flight whatever its age, and the active-order-line index counts it, so another key on that order line is denied by R4 until a staleness check can take the row over.
+- **The key re-check is not reachable by the tests today.** On this schema Postgres has reported the key index before the active-order-line index, so a same-key request on an active order line is already a `KeyConflict` before the explicit check runs, and removing the check changes no test result. It stays as a guard for a schema where the order of the two indexes differs.
+- **The helpers read rows by position.** `insert_audit` and the blocker lookup assume the default tuple row factory, which the pool uses; a connection created with another row factory would give wrong values.
+- **The TTL has no setting yet.** `lookup_key` takes it as an argument.
+
 ## Measured
 
 All runs used Docker Desktop on WSL2 and Docker Compose v2.32.4, the pool at 4 / 4, one API worker (as in the Dockerfile), and the host name `postgres` kept in `DATABASE_URL` and resolved through `extra_hosts` to a fixed address (see [The Compose network](#the-compose-network)). Every run used a throwaway Compose project on its own subnet; the default subnet itself was not run. The runs fall into two groups, and every row says which one it is from.

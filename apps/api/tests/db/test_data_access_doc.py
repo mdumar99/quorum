@@ -12,6 +12,7 @@ from db_helpers import REPO_ROOT
 
 from app.config import Settings
 from app.db.pool import POOL_STARTED_EVENT
+from app.db.returns import ACTIVE_ORDER_LINE_INDEX, KEY_INDEX
 
 DOC = REPO_ROOT / "docs" / "data-access.md"
 POOL_SETTINGS = sorted(name for name in Settings.model_fields if name.startswith("db_pool_"))
@@ -101,3 +102,116 @@ def test_the_doc_does_not_call_the_existing_stack_step_untested(text):
     section = "\n".join(compose_section(text)).lower()
     found = [phrase for phrase in OLD_WORDING if phrase in section]
     assert not found, f"the Compose network section still says: {found}"
+
+
+# ---- The returns repository section: the contract of the write side (issue #54) ----------------
+
+REPOSITORY_HEADING = "## The returns repository"
+KNOWN_LIMITS_HEADING = "### Known limits of the repository"
+
+
+def repository_section(text: str) -> list[str]:
+    """The lines under "## The returns repository", up to the next "## " heading.
+
+    Loud like `compose_section`: a missing heading or an empty section fails with a message, because
+    a check over an empty section would pass without proving anything.
+    """
+    lines = text.splitlines()
+    assert REPOSITORY_HEADING in lines, f"the doc has no {REPOSITORY_HEADING!r} heading"
+    section: list[str] = []
+    for line in lines[lines.index(REPOSITORY_HEADING) + 1 :]:
+        if line.startswith("## "):
+            break
+        section.append(line)
+    assert any(line.strip() for line in section), f"the {REPOSITORY_HEADING!r} section has no lines"
+    return section
+
+
+def subsection(section: list[str], heading: str) -> list[str]:
+    """The lines under one "### " heading of the repository section, loud when it is missing."""
+    assert heading in section, f"the repository section has no {heading!r} heading"
+    lines: list[str] = []
+    for line in section[section.index(heading) + 1 :]:
+        if line.startswith("### "):
+            break
+        lines.append(line)
+    assert any(line.strip() for line in lines), f"the {heading!r} subsection has no lines"
+    return lines
+
+
+def lines_with(section: list[str], *needles: str) -> list[str]:
+    """The lines of the section that contain every needle."""
+    return [line for line in section if all(needle in line for needle in needles)]
+
+
+# (function, the result classes its bullet must name)
+RETURNS = [
+    ("lookup_key", ["NoKey", "ExpiredKey", "PayloadMismatch", "InFlight", "Retryable", "Replay"]),
+    ("insert_return", ["Inserted", "R4Denied", "KeyConflict"]),
+    ("finalize_decided", ["Applied", "Lost"]),
+    ("finalize_failed", ["Applied", "Lost"]),
+    ("retry_failed", ["Retried", "R4Denied", "Lost"]),
+]
+
+
+@pytest.mark.parametrize(("name", "classes"), RETURNS, ids=[name for name, _ in RETURNS])
+def test_each_function_has_its_own_bullet_that_names_what_it_returns(text, name, classes):
+    bullets = [line for line in repository_section(text) if line.startswith(f"- `{name}(")]
+    assert len(bullets) == 1, f"expected one bullet for {name}, found {len(bullets)}"
+    missing = [cls for cls in classes if f"`{cls}`" not in bullets[0]]
+    assert not missing, f"the {name} bullet does not name {missing}"
+
+
+def test_the_two_unique_index_names_are_the_ones_in_the_code(text):
+    section = "\n".join(repository_section(text))
+    for name in (ACTIVE_ORDER_LINE_INDEX, KEY_INDEX):
+        assert f"`{name}`" in section, f"the repository section does not name {name}"
+
+
+def test_the_doc_says_the_repository_assumes_read_committed(text):
+    found = lines_with(repository_section(text), "assumes", "READ COMMITTED")
+    assert found, "no line says that the repository assumes READ COMMITTED"
+
+
+def test_the_doc_says_the_repository_never_calls_conn_transaction(text):
+    found = lines_with(
+        repository_section(text), "never calls `conn.transaction()`", "outer transaction", "commits"
+    )
+    assert found, "no line says why `conn.transaction()` is never used (outer transaction, commits)"
+
+
+def test_the_doc_says_a_retry_denied_by_r4_advances_attempt_to_n_plus_1(text):
+    found = lines_with(repository_section(text), "denied by R4", "`attempt`", "n + 1", "ADR-0004")
+    assert found, "no line says that a retry denied by R4 advances `attempt` to n + 1 (ADR-0004)"
+
+
+def test_the_doc_says_autocommit_is_refused(text):
+    found = lines_with(
+        repository_section(text), "Autocommit is refused", "`RuntimeError`", "before any SQL"
+    )
+    assert found, "no line says that autocommit is refused with a RuntimeError before any SQL"
+
+
+def test_the_doc_lists_the_audit_event_types(text):
+    found = lines_with(repository_section(text), "One audit row per attempt")
+    assert len(found) == 1, f"expected one audit-rows bullet, found {len(found)}"
+    names = ["rules_decided", "llm_decided", "escalated", "r4_denied", "superseded"]
+    missing = [name for name in [*names, "failed_<error_type>"] if f"`{name}`" not in found[0]]
+    assert not missing, f"the audit-rows bullet does not name {missing}"
+
+
+def test_the_doc_says_how_to_run_the_integration_tests_safely(text):
+    found = lines_with(repository_section(text), "`QUORUM_TEST_DB=throwaway`", "`CI=true`")
+    assert found, "no line names QUORUM_TEST_DB=throwaway and CI=true"
+
+
+def test_the_known_limits_name_the_stuck_processing_and_the_unreachable_key_check(text):
+    limits = subsection(repository_section(text), KNOWN_LIMITS_HEADING)
+    assert lines_with(limits, "P1-13", "order line"), "no limit names the stuck processing row"
+    assert lines_with(limits, "key re-check", "not reachable"), "no limit names the key re-check"
+
+
+def test_the_repository_section_has_no_private_references(text):
+    section = "\n".join(repository_section(text))
+    found = re.findall(r"\bD-\d{3}\b|quorum-notes|scratchpad|/tmp/|~/", section)
+    assert not found, f"the public section names private things: {found}"
